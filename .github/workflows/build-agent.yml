@@ -1,10 +1,10 @@
 name: Build PC Agent (Windows)
 
 on:
-  workflow_dispatch:                 # 手动触发
+  workflow_dispatch:
   push:
     paths:
-      - 'agent/**'                   # 仅当 agent 目录有变化时触发
+      - 'agent/**'
     branches: [ "main", "master" ]
 
 jobs:
@@ -13,23 +13,20 @@ jobs:
     continue-on-error: false
 
     steps:
-      # 1. 检出代码
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2. 安装 .NET 8 SDK
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
-      # 3. 还原依赖
       - name: Restore dependencies
         run: dotnet restore agent/TetherAgent.csproj
+        shell: bash
 
-      # 4. 编译发布（生成单文件 exe）
       - name: Publish Windows executable
         run: |
           dotnet publish agent/TetherAgent.csproj \
@@ -38,8 +35,8 @@ jobs:
             --self-contained false \
             -p:PublishSingleFile=true \
             -o ./publish
+        shell: bash
 
-      # 5. 上传 exe 作为构建产物
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -47,9 +44,9 @@ jobs:
           path: ./publish/TetherAgent.exe
           retention-days: 30
 
-      # 6. 邮件通知（复用 Android 的 Resend 方式）
       - name: Send build status email via Resend
         if: always()
+        shell: bash
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
