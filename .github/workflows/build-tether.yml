@@ -1,0 +1,104 @@
+name: Build Tether APK
+
+on:
+  workflow_dispatch:                     # 手动触发
+  push:
+    branches: [ "main", "master" ]       # 推送到主分支时触发
+    tags: [ "v*" ]                       # 推送 v1.0.0 等标签时触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # 即使构建失败，也要继续执行后续的邮件通知步骤
+    continue-on-error: false
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. 设置 JDK 21 (Android Gradle 8.0+ 需要)
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'corretto'
+
+      # 3. 设置 Gradle（自动下载并缓存，无需仓库自带 gradlew）
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      # 4. 【核心】多架构 ABI 适配（自动修改 build.gradle.kts）
+      - name: Adapt ABI filters for Multi-Architecture
+        run: |
+          # 将原有的单架构替换为 4 种主流架构
+          sed -i 's/abiFilters("arm64-v8a")/abiFilters("armeabi-v7a", "arm64-v8a", "x86", "x86_64")/' app/build.gradle.kts
+          echo "✅ ABI filters updated successfully!"
+          grep -A 2 "abiFilters" app/build.gradle.kts || true
+
+      # 5. 解码签名 Keystore（从 Secrets 读取 Base64）
+      - name: Decode Keystore
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > app/keystore.jks
+          echo "✅ Keystore decoded."
+
+      # 6. 构建 Release APK（通过命令行动态注入签名，绝不泄露密码）
+      - name: Build Release APK
+        run: |
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=$(pwd)/app/keystore.jks \
+            -Pandroid.injected.signing.store.password=${{ secrets.SIGNING_KEYSTORE_PASSWORD }} \
+            -Pandroid.injected.signing.key.alias=${{ secrets.SIGNING_KEY_ALIAS }} \
+            -Pandroid.injected.signing.key.password=${{ secrets.SIGNING_KEY_PASSWORD }}
+
+      # 7. 上传 APK 作为构建产物（留档 30 天）
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tether-APK-${{ github.sha }}
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+      # 8. 【通知】通过 Resend API 发送构建状态邮件（无论成败都发）
+      - name: Send build status email via Resend
+        if: always()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          BUILD_STATUS: ${{ job.status }}
+        run: |
+          if [ "$BUILD_STATUS" = "success" ]; then
+            STATUS_EMOJI="✅"
+          else
+            STATUS_EMOJI="❌"
+          fi
+
+          HTML_BODY=$(cat <<EOF
+          <h2>${STATUS_EMOJI} Tether 构建状态：${BUILD_STATUS}</h2>
+          <table style="border-collapse: collapse; width: 100%;">
+            <tr><td><b>项目</b></td><td>Tether (局域网控屏)</td></tr>
+            <tr><td><b>分支</b></td><td>${{ github.ref_name }}</td></tr>
+            <tr><td><b>提交 ID</b></td><td><code>${{ github.sha }}</code></td></tr>
+            <tr><td><b>提交信息</b></td><td>${{ github.event.head_commit.message }}</td></tr>
+            <tr><td><b>触发人</b></td><td>${{ github.actor }}</td></tr>
+            <tr><td><b>Action 详情</b></td><td><a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">点击查看日志</a></td></tr>
+          </table>
+          <hr>
+          <p style="color: #666; font-size: 12px;">此邮件由 GitHub Actions 通过 Resend API 自动发送。</p>
+          EOF
+          )
+
+          curl -X POST "https://api.resend.com/emails" \
+            -H "Authorization: Bearer ${RESEND_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "from": "'"${SENDER_EMAIL}"'",
+              "to": ["'"${NOTIFY_EMAIL}"'"],
+              "subject": "Tether 构建 '"${BUILD_STATUS}"' - '"${GITHUB_REF_NAME}"'",
+              "html": '"$(echo "$HTML_BODY" | jq -s -R .)"'
+            }'
