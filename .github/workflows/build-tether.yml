@@ -46,10 +46,10 @@ jobs:
           echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > app/keystore.jks
           echo "✅ Keystore decoded."
 
-      # 6. 构建 Release APK（通过命令行动态注入签名，绝不泄露密码）
+      # 6. 构建 Release APK（通过命令行动态注入签名）
       - name: Build Release APK
         run: |
-          ./gradlew assembleRelease \
+          gradle assembleRelease \
             -Pandroid.injected.signing.store.file=$(pwd)/app/keystore.jks \
             -Pandroid.injected.signing.store.password=${{ secrets.SIGNING_KEYSTORE_PASSWORD }} \
             -Pandroid.injected.signing.key.alias=${{ secrets.SIGNING_KEY_ALIAS }} \
