@@ -210,7 +210,7 @@ public partial class MainForm : Form
                 socket.ReceiveTimeout = 1000;
 
                 var buffer = new byte[1024];
-                var remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
+                EndPoint remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
 
                 AppendLog($"📡 mDNS 监听已启动 (端口 {MDNS_PORT})");
 
