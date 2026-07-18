@@ -61,13 +61,9 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if ($env:BUILD_STATUS -eq "success") {
-            $STATUS_EMOJI = "✅"
-          } else {
-            $STATUS_EMOJI = "❌"
-          }
+          $STATUS_EMOJI = if ($env:BUILD_STATUS -eq "success") { "✅" } else { "❌" }
           $SHORT_SHA = $env:GITHUB_SHA.Substring(0, 7)
-
+      
           $HTML_BODY = @"
           <div style="max-width:600px;margin:0 auto;font-family:Arial,sans-serif;padding:20px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;">
             <div style="background:#ffffff;border-radius:8px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
@@ -89,21 +85,19 @@ jobs:
             </div>
           </div>
           "@
-
-          # 转义 HTML 中的双引号，用于 JSON
-          $ESC_HTML = $HTML_BODY -replace '"', '\"'
-
-          $JSON_BODY = @"
-          {
-            "from": "$env:SENDER_EMAIL",
-            "to": ["$env:NOTIFY_EMAIL"],
-            "subject": "Tether Agent 构建 $env:BUILD_STATUS - $env:GITHUB_REF_NAME",
-            "html": "$ESC_HTML"
-          }
-          "@
-
-          # 发送邮件
-          curl -X POST "https://api.resend.com/emails" `
-            -H "Authorization: Bearer $env:RESEND_API_KEY" `
-            -H "Content-Type: application/json; charset=utf-8" `
-            -d $JSON_BODY
+      
+          # 用 ConvertTo-Json 自动转义
+          $BODY = @{
+            from = $env:SENDER_EMAIL
+            to = @($env:NOTIFY_EMAIL)
+            subject = "Tether Agent 构建 $env:BUILD_STATUS - $env:GITHUB_REF_NAME"
+            html = $HTML_BODY
+          } | ConvertTo-Json -Compress
+      
+          Invoke-RestMethod -Uri "https://api.resend.com/emails" `
+            -Method Post `
+            -Headers @{
+              "Authorization" = "Bearer $env:RESEND_API_KEY"
+              "Content-Type" = "application/json; charset=utf-8"
+            } `
+            -Body $BODY
