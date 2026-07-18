@@ -41,15 +41,15 @@ fun TetherApp(
 
     Scaffold(
         topBar = {
-            // 改为 SmallTopAppBar，高度减半
-            SmallTopAppBar(
+            // TopAppBar
+            TopAppBar(
                 title = { Text("Tether") },
                 navigationIcon = {
                     IconButton(onClick = { viewModel.tcpScanNetwork() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
                     }
                 },
-                colors = TopAppBarDefaults.smallTopAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.primary
                 )
