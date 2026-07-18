@@ -28,9 +28,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             TetherTheme {
                 val viewModel: TetherViewModel = viewModel()
-                LaunchedEffect(Unit) {
-                    viewModel.init(applicationContext)
-                }
+                // 持久化存储由 ViewModel 内部管理
                 TetherApp(viewModel = viewModel)
             }
         }
