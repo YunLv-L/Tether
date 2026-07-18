@@ -197,30 +197,36 @@ public partial class MainForm : Form
         }
     }
 
-    // ==================== mDNS 响应服务 ====================
+    // ==================== mDNS 响应服务（SO_REUSEADDR 支持多进程共享端口） ====================
     private void MdnsResponseLoop()
     {
         try
         {
-            using (var udpClient = new UdpClient(MDNS_PORT))
+            // 用 Socket 代替 UdpClient，手动设置 SO_REUSEADDR
+            using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
             {
-                udpClient.EnableBroadcast = true;
-                AppendLog("📡 mDNS 监听已启动");
+                socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                socket.Bind(new IPEndPoint(IPAddress.Any, MDNS_PORT));
+                socket.ReceiveTimeout = 1000;
+
+                var buffer = new byte[1024];
+                var remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
+
+                AppendLog($"📡 mDNS 监听已启动 (端口 {MDNS_PORT})");
 
                 while (_isRunning)
                 {
                     try
                     {
-                        var endpoint = new IPEndPoint(IPAddress.Any, 0);
-                        var data = udpClient.Receive(ref endpoint);
-                        string query = Encoding.UTF8.GetString(data);
+                        int received = socket.ReceiveFrom(buffer, ref remoteEndPoint);
+                        string query = Encoding.UTF8.GetString(buffer, 0, received);
 
                         if (query.Contains("_tether._tcp") || query.Contains("TETHER"))
                         {
                             string response = $"TETHER_SERVICE|{_deviceName}|{_ipAddress}|{_machineCode}\n";
                             byte[] respData = Encoding.UTF8.GetBytes(response);
-                            udpClient.Send(respData, respData.Length, endpoint);
-                            AppendLog($"📡 mDNS 响应: {endpoint.Address}");
+                            socket.SendTo(respData, remoteEndPoint);
+                            AppendLog($"📡 mDNS 响应: {remoteEndPoint.Address}");
                         }
                     }
                     catch (SocketException)
@@ -335,7 +341,7 @@ public partial class MainForm : Form
         }
         catch (Exception ex)
         {
-            return $"执行失败: {ex.Message}";
+            return $"执行失败: {ex.Message}");
         }
     }
 
