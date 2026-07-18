@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -32,16 +33,23 @@ class TetherViewModel : ViewModel() {
     private val udpPort = 5555
     private val tcpPort = 5556
     private val discoveryTimeout = 3000L
-    private val tcpTimeout = 500 // TCP 连接超时（毫秒）
+    private val tcpTimeout = 500
 
-    // ==================== UDP 广播扫描（保留，但可能被防火墙拦截） ====================
+    // 扫描任务 Job，用于取消
+    private var scanJob: Job? = null
+
+    // ==================== UDP 广播扫描 ====================
     fun startDiscovery() {
-        if (_isScanning.value) return
+        if (_isScanning.value) {
+            // 如果正在扫描，点击直接停止
+            stopScan()
+            return
+        }
         _devices.value = emptyList()
         _isScanning.value = true
         _statusMessage.value = "正在扫描..."
 
-        viewModelScope.launch {
+        scanJob = viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 var socket: DatagramSocket? = null
                 try {
@@ -56,6 +64,8 @@ class TetherViewModel : ViewModel() {
                     val foundDevices = mutableListOf<String>()
 
                     while (System.currentTimeMillis() - startTime < discoveryTimeout) {
+                        // 检查是否被取消
+                        if (!_isScanning.value) break
                         try {
                             socket.receive(packet)
                             val message = String(packet.data, 0, packet.length)
@@ -78,42 +88,51 @@ class TetherViewModel : ViewModel() {
                         }
                     }
                     withContext(Dispatchers.Main) {
-                        _statusMessage.value = if (foundDevices.isEmpty()) {
-                            "UDP 扫描无结果，尝试 TCP 扫描..."
-                        } else {
-                            "发现 ${foundDevices.size} 台设备"
+                        if (_isScanning.value) {
+                            _statusMessage.value = if (foundDevices.isEmpty()) {
+                                "UDP 扫描无结果，切换到 TCP 扫描..."
+                            } else {
+                                "发现 ${foundDevices.size} 台设备"
+                            }
                         }
                     }
-                    // 如果 UDP 没有发现设备，自动启动 TCP 扫描
-                    if (foundDevices.isEmpty()) {
+                    // 如果 UDP 没有发现设备且没有被取消，自动启动 TCP 扫描
+                    if (foundDevices.isEmpty() && _isScanning.value) {
                         withContext(Dispatchers.Main) {
                             _statusMessage.value = "切换到 TCP 端口扫描..."
                         }
                         tcpScanNetwork()
                     }
                 } catch (e: Exception) {
-                    withContext(Dispatchers.Main) {
-                        _statusMessage.value = "扫描异常: ${e.message}"
+                    if (_isScanning.value) {
+                        withContext(Dispatchers.Main) {
+                            _statusMessage.value = "扫描异常: ${e.message}"
+                        }
+                        Log.e("Tether", "扫描异常", e)
                     }
-                    Log.e("Tether", "扫描异常", e)
                 } finally {
                     socket?.close()
-                    withContext(Dispatchers.Main) {
-                        _isScanning.value = false
+                    if (_isScanning.value) {
+                        withContext(Dispatchers.Main) {
+                            _isScanning.value = false
+                        }
                     }
                 }
             }
         }
     }
 
-    // ==================== TCP 局域网 IP 段扫描（核心发现机制） ====================
+    // ==================== TCP 局域网扫描 ====================
     fun tcpScanNetwork() {
-        if (_isScanning.value) return
+        if (_isScanning.value) {
+            stopScan()
+            return
+        }
         _devices.value = emptyList()
         _isScanning.value = true
         _statusMessage.value = "正在扫描局域网..."
 
-        viewModelScope.launch {
+        scanJob = viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val baseIp = getLocalIpBase()
                 val foundDevices = mutableListOf<String>()
@@ -122,6 +141,12 @@ class TetherViewModel : ViewModel() {
                 Log.d("Tether", "开始 TCP 扫描网段: $baseIp.*")
 
                 for (i in 1..254) {
+                    // 检查是否被取消
+                    if (!_isScanning.value) {
+                        Log.d("Tether", "扫描被用户暂停")
+                        break
+                    }
+
                     val ip = "$baseIp.$i"
                     try {
                         Socket(ip, tcpPort).use { socket ->
@@ -142,20 +167,22 @@ class TetherViewModel : ViewModel() {
                                     val display = "$ip:$deviceName"
                                     if (!foundDevices.contains(display)) {
                                         foundDevices.add(display)
+                                        // 发现设备立即显示
                                         withContext(Dispatchers.Main) {
                                             _devices.value = foundDevices.toList()
-                                            _statusMessage.value = "发现 ${foundDevices.size} 台设备"
+                                            _statusMessage.value = "发现设备: $display"
                                         }
                                     }
                                 }
                             }
                         }
                     } catch (e: Exception) {
-                        // 连接失败，跳过（大部分 IP 没有服务）
+                        // 连接失败，跳过
                     }
 
                     scannedCount++
-                    if (scannedCount % 10 == 0) {
+                    // 每 10 个更新一次进度
+                    if (scannedCount % 10 == 0 && _isScanning.value) {
                         withContext(Dispatchers.Main) {
                             _statusMessage.value = "扫描中... ${scannedCount}/254"
                         }
@@ -164,14 +191,23 @@ class TetherViewModel : ViewModel() {
 
                 withContext(Dispatchers.Main) {
                     _isScanning.value = false
-                    _statusMessage.value = if (foundDevices.isEmpty()) {
-                        "未发现设备，请检查 PC Agent 是否运行，或手动输入 IP"
+                    if (foundDevices.isEmpty()) {
+                        _statusMessage.value = "未发现设备，请检查 PC Agent 是否运行，或手动输入 IP"
                     } else {
-                        "发现 ${foundDevices.size} 台设备"
+                        _statusMessage.value = "发现 ${foundDevices.size} 台设备"
                     }
                 }
             }
         }
+    }
+
+    // ==================== 停止扫描 ====================
+    fun stopScan() {
+        _isScanning.value = false
+        scanJob?.cancel()
+        scanJob = null
+        _statusMessage.value = "扫描已停止"
+        Log.d("Tether", "扫描已停止")
     }
 
     // ==================== 获取本机 IP 前缀 ====================
@@ -185,7 +221,6 @@ class TetherViewModel : ViewModel() {
                     val addr = addresses.nextElement()
                     if (!addr.isLoopbackAddress && addr is Inet4Address) {
                         val ip = addr.hostAddress ?: continue
-                        // 只扫描私有 IP 段
                         if (ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172.16.") ||
                             ip.startsWith("172.17.") || ip.startsWith("172.18.") || ip.startsWith("172.19.") ||
                             ip.startsWith("172.20.") || ip.startsWith("172.21.") || ip.startsWith("172.22.") ||
@@ -242,7 +277,6 @@ class TetherViewModel : ViewModel() {
                         output.write((command + "\n").toByteArray())
                         output.flush()
 
-                        // 尝试读取响应（可选）
                         try {
                             val input = socket.getInputStream()
                             val buffer = ByteArray(1024)
@@ -255,7 +289,7 @@ class TetherViewModel : ViewModel() {
                                 return@withContext
                             }
                         } catch (e: Exception) {
-                            // 没有响应也正常（部分指令不返回）
+                            // 没有响应也正常
                         }
 
                         withContext(Dispatchers.Main) {

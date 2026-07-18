@@ -7,9 +7,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,14 +41,15 @@ fun TetherApp(
 
     Scaffold(
         topBar = {
-            LargeTopAppBar(
+            // 改为 SmallTopAppBar，高度减半
+            SmallTopAppBar(
                 title = { Text("Tether") },
                 navigationIcon = {
-                    IconButton(onClick = { viewModel.startDiscovery() }) {
+                    IconButton(onClick = { viewModel.tcpScanNetwork() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
                     }
                 },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
+                colors = TopAppBarDefaults.smallTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.primary
                 )
@@ -68,7 +68,9 @@ fun TetherApp(
                         Icon(Icons.Default.Refresh, contentDescription = "扫描")
                     }
                 },
-                text = { Text(if (isScanning) "扫描中..." else "扫描设备") },
+                text = {
+                    Text(if (isScanning) "停止扫描" else "扫描设备")
+                },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             )
@@ -89,19 +91,12 @@ fun TetherApp(
                     colors = AssistChipDefaults.assistChipColors(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         labelColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    ),
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
+                    )
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // 手动输入 IP（MD3 OutlinedTextField）
+            // 手动输入 IP
             var manualIp by remember { mutableStateOf("") }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -134,9 +129,9 @@ fun TetherApp(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 设备列表（MD3 ListItem 风格）
+            // 设备列表
             if (devices.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -199,9 +194,9 @@ fun TetherApp(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 指令按钮（MD3 FilledButton 风格）
+            // 指令按钮
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
