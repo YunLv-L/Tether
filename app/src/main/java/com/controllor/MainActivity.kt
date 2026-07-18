@@ -1,21 +1,23 @@
 package com.tether.controller
 
-import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tether.controller.ui.theme.TetherTheme
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,21 +42,36 @@ fun TetherApp(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("🔗 Tether", color = MaterialTheme.colorScheme.primary) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+            LargeTopAppBar(
+                title = { Text("Tether") },
+                navigationIcon = {
+                    IconButton(onClick = { viewModel.startDiscovery() }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                    }
+                },
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.primary
                 )
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
+            ExtendedFloatingActionButton(
                 onClick = { viewModel.startDiscovery() },
+                icon = {
+                    if (isScanning) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = "扫描")
+                    }
+                },
+                text = { Text(if (isScanning) "扫描中..." else "扫描设备") },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
-            ) {
-                Text(if (isScanning) "⏳" else "🔍")
-            }
+            )
         }
     ) { paddingValues ->
         Column(
@@ -70,13 +87,21 @@ fun TetherApp(
                     label = { Text(statusMessage) },
                     modifier = Modifier.fillMaxWidth(),
                     colors = AssistChipDefaults.assistChipColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    )
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        labelColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ),
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 )
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // 手动输入 IP
+            // 手动输入 IP（MD3 OutlinedTextField）
             var manualIp by remember { mutableStateOf("") }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -87,14 +112,22 @@ fun TetherApp(
                     onValueChange = { manualIp = it },
                     label = { Text("输入 IP 地址") },
                     modifier = Modifier.weight(1f),
-                    singleLine = true
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.medium,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    )
                 )
                 Button(
                     onClick = {
                         if (manualIp.isNotBlank()) {
                             viewModel.addManualDevice(manualIp)
+                            manualIp = ""
                         }
                     },
+                    enabled = manualIp.isNotBlank(),
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.align(Alignment.CenterVertically)
                 ) {
                     Text("连接")
@@ -103,14 +136,15 @@ fun TetherApp(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 设备列表
+            // 设备列表（MD3 ListItem 风格）
             if (devices.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = if (isScanning) "正在扫描..." else "未发现设备",
+                        text = if (isScanning) "正在扫描设备..." else "未发现设备\n请点击右下角扫描按钮",
+                        style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -119,109 +153,90 @@ fun TetherApp(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(devices) { device ->
-                        DeviceCard(
-                            device = device,
-                            isSelected = device == selectedDevice,
-                            onClick = { viewModel.selectDevice(device) }
-                        )
+                        val isSelected = device == selectedDevice
+                        Card(
+                            onClick = { viewModel.selectDevice(device) },
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                }
+                            ),
+                            elevation = CardDefaults.cardElevation(
+                                defaultElevation = if (isSelected) 4.dp else 1.dp
+                            ),
+                            shape = MaterialTheme.shapes.medium,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = device,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "已选中",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 指令按钮
+            // 指令按钮（MD3 FilledButton 风格）
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                ActionButton(
-                    text = "🔒 锁定",
+                FilledTonalButton(
                     onClick = { viewModel.sendCommand("lock") },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.tertiary
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
-                ActionButton(
-                    text = "💤 睡眠",
-                    onClick = { viewModel.sendCommand("sleep") },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
-                ActionButton(
-                    text = "⏻ 关机",
-                    onClick = { viewModel.sendCommand("shutdown") },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun DeviceCard(
-    device: String,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    Card(
-        onClick = onClick,
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surface
-            }
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = if (isSelected) 4.dp else 1.dp
-        ),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = device,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (isSelected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurface
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                ) {
+                    Text("🔒 锁定")
                 }
-            )
-            if (isSelected) {
-                Icon(
-                    imageVector = androidx.compose.material.icons.Icons.Default.Check,
-                    contentDescription = "已选中",
-                    tint = MaterialTheme.colorScheme.primary
-                )
+                FilledTonalButton(
+                    onClick = { viewModel.sendCommand("sleep") },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                ) {
+                    Text("💤 睡眠")
+                }
+                FilledTonalButton(
+                    onClick = { viewModel.sendCommand("shutdown") },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                ) {
+                    Text("⏻ 关机")
+                }
             }
         }
-    }
-}
-
-@Composable
-fun ActionButton(
-    text: String,
-    onClick: () -> Unit,
-    colors: ButtonColors,
-    modifier: Modifier = Modifier
-) {
-    Button(
-        onClick = onClick,
-        colors = colors,
-        modifier = modifier
-    ) {
-        Text(text)
     }
 }
