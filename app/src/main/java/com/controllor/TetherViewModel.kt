@@ -208,13 +208,12 @@ class TetherViewModel : ViewModel() {
         val manager = nsdManager ?: return false
         var found = false
         var listener: NsdManager.DiscoveryListener? = null
-
+    
         try {
             listener = object : NsdManager.DiscoveryListener {
                 override fun onServiceFound(serviceInfo: NsdServiceInfo) {
                     val ip = serviceInfo.host?.hostAddress ?: return
                     val name = serviceInfo.serviceName
-                    // 从 serviceInfo 中提取机器码（如果有）
                     val machineCode = serviceInfo.attributes?.get("machineCode")?.let { String(it) } ?: ""
                     val id = if (machineCode.isNotEmpty()) machineCode else "$name|$ip"
                     val device = DeviceInfo(
@@ -225,7 +224,6 @@ class TetherViewModel : ViewModel() {
                         machineCode = machineCode
                     )
                     synchronized(foundDevices) {
-                        // 如果已存在相同 ID，更新 IP
                         val existing = foundDevices[id]
                         if (existing != null) {
                             foundDevices[id] = existing.copy(ip = ip, isOnline = true)
@@ -236,7 +234,7 @@ class TetherViewModel : ViewModel() {
                     found = true
                     _statusMessage.value = "发现设备: $ip:$name (mDNS)"
                 }
-
+    
                 override fun onServiceLost(serviceInfo: NsdServiceInfo) {
                     val ip = serviceInfo.host?.hostAddress ?: return
                     val name = serviceInfo.serviceName
@@ -253,22 +251,30 @@ class TetherViewModel : ViewModel() {
                         }
                     }
                 }
-
-                override fun onDiscoveryStopped(service: String) {}
+    
+                override fun onDiscoveryStarted(serviceType: String) {
+                    Log.d("Tether", "mDNS 发现已启动: $serviceType")
+                }
+    
+                override fun onDiscoveryStopped(service: String) {
+                    Log.d("Tether", "mDNS 发现已停止")
+                }
+    
                 override fun onStartDiscoveryFailed(service: String, errorCode: Int) {
                     Log.d("Tether", "mDNS 启动失败: $errorCode")
                 }
+    
                 override fun onStopDiscoveryFailed(service: String, errorCode: Int) {
                     Log.d("Tether", "mDNS 停止失败: $errorCode")
                 }
             }
-
+    
             mdnsListener = listener
             manager.discoverServices("_tether._tcp", NsdManager.PROTOCOL_DNS_SD, listener)
             Log.d("Tether", "mDNS 发现已启动")
-
+    
             delay(6000)
-
+    
         } catch (e: Exception) {
             Log.e("Tether", "mDNS 异常", e)
         } finally {
