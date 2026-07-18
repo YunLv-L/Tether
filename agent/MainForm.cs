@@ -66,7 +66,13 @@ public partial class MainForm : Form
         }
         _isRunning = false;
         _tcpListener?.Stop();
-        _udpThread?.Abort();
+        
+        // 不使用 Abort，改用 Join 等待线程自然结束
+        if (_udpThread != null && _udpThread.IsAlive)
+        {
+            _udpThread.Join(1000);  // 等待1秒
+        }
+        
         _trayIcon?.Dispose();
     }
 
