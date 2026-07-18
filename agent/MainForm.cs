@@ -226,18 +226,36 @@ public partial class MainForm : Form
                 client.ReceiveTimeout = 5000;
                 client.SendTimeout = 5000;
 
+                // 获取主屏幕边界
+                var screen = Screen.PrimaryScreen;
+                var bounds = screen != null ? screen.Bounds : 
+                    new Rectangle(0, 0, SystemInformation.PrimaryMonitorSize.Width, SystemInformation.PrimaryMonitorSize.Height);
+
                 // 发送屏幕尺寸
-                var bounds = Screen.PrimaryScreen.Bounds;
                 var sizeInfo = $"{bounds.Width}|{bounds.Height}\n";
                 byte[] sizeData = Encoding.UTF8.GetBytes(sizeInfo);
                 stream.Write(sizeData, 0, sizeData.Length);
                 stream.Flush();
                 AppendLog($"🖥️ 画面客户端连接: {client.Client.RemoteEndPoint} ({bounds.Width}x{bounds.Height})");
 
-                // 持续推流
+                var stopwatch = new Stopwatch();
+                stopwatch.Start();
+                int targetFps = 30;
+                int frameIntervalMs = 1000 / targetFps;
+
                 while (_isRunning && client.Connected)
                 {
-                    var imageData = CaptureScreen();
+                    long elapsed = stopwatch.ElapsedMilliseconds;
+                    if (elapsed < frameIntervalMs)
+                    {
+                        int remaining = (int)(frameIntervalMs - elapsed);
+                        if (remaining > 0 && remaining < 100)
+                            Thread.Sleep(remaining);
+                        continue;
+                    }
+                    stopwatch.Restart();
+
+                    var imageData = CaptureScreen(bounds);
                     if (imageData == null) continue;
 
                     // 发送长度(4字节) + 图像数据
@@ -245,9 +263,6 @@ public partial class MainForm : Form
                     stream.Write(lengthBytes, 0, 4);
                     stream.Write(imageData, 0, imageData.Length);
                     stream.Flush();
-
-                    // 限制帧率 ~30fps
-                    Thread.Sleep(33);
                 }
             }
         }
@@ -257,23 +272,87 @@ public partial class MainForm : Form
         }
     }
 
-    private byte[]? CaptureScreen()
+    private byte[]? CaptureScreen(Rectangle bounds)
     {
         try
         {
-            var bounds = Screen.PrimaryScreen.Bounds;
+            // 验证边界有效性
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+            {
+                bounds = new Rectangle(0, 0,
+                    SystemInformation.PrimaryMonitorSize.Width,
+                    SystemInformation.PrimaryMonitorSize.Height);
+            }
+
+            // 防止尺寸过大
+            if (bounds.Width > 10000 || bounds.Height > 10000)
+            {
+                bounds = new Rectangle(0, 0, 1920, 1080);
+            }
+
             using (var bitmap = new Bitmap(bounds.Width, bounds.Height))
             using (var graphics = Graphics.FromImage(bitmap))
             {
-                graphics.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size);
+                graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighSpeed;
+                graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Low;
+                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighSpeed;
+
+                // 重试机制（最多3次）
+                bool success = false;
+                for (int retry = 0; retry < 3; retry++)
+                {
+                    try
+                    {
+                        graphics.CopyFromScreen(
+                            bounds.X,
+                            bounds.Y,
+                            0,
+                            0,
+                            bounds.Size,
+                            CopyPixelOperation.SourceCopy
+                        );
+                        success = true;
+                        break;
+                    }
+                    catch (ArgumentException)
+                    {
+                        if (retry == 0)
+                        {
+                            bounds = new Rectangle(0, 0, bounds.Width, bounds.Height);
+                            continue;
+                        }
+                        if (retry == 1)
+                        {
+                            bounds = new Rectangle(0, 0,
+                                SystemInformation.PrimaryMonitorSize.Width,
+                                SystemInformation.PrimaryMonitorSize.Height);
+                            continue;
+                        }
+                        throw;
+                    }
+                }
+
+                if (!success)
+                {
+                    return null;
+                }
+
+                // 压缩为 JPEG
                 using (var ms = new MemoryStream())
                 {
                     var codec = ImageCodecInfo.GetImageEncoders()
                         .FirstOrDefault(c => c.FormatID == ImageFormat.Jpeg.Guid);
+                    
+                    if (codec == null)
+                    {
+                        bitmap.Save(ms, ImageFormat.Png);
+                        return ms.ToArray();
+                    }
+
                     var encoderParams = new EncoderParameters(1);
                     encoderParams.Param[0] = new EncoderParameter(
                         System.Drawing.Imaging.Encoder.Quality,
-                        85
+                        85L
                     );
                     bitmap.Save(ms, codec, encoderParams);
                     return ms.ToArray();
@@ -282,7 +361,7 @@ public partial class MainForm : Form
         }
         catch (Exception ex)
         {
-            AppendLog($"❌ 截屏失败: {ex.Message}");
+            // 静默失败，不刷日志
             return null;
         }
     }
@@ -293,7 +372,7 @@ public partial class MainForm : Form
 
     private void UpdateAutoStartStatus()
     {
-        // 在UI上显示状态（如果有CheckBox或Label的话）
+        // UI 状态更新（如有需要）
     }
 
     private bool IsAutoStartEnabled()
