@@ -271,7 +271,7 @@ class TetherViewModel : ViewModel() {
                                     val len = input.read(buffer)
                                     if (len > 0) {
                                         val response = String(buffer, 0, len)
-                                        if (response.startsWith("pong|")) {
+                                        if (response.startsWith("pong")) {
                                             val parts = response.split("|")
                                             val deviceName = if (parts.size >= 2) parts[1] else "PC"
                                             val machineCode = if (parts.size >= 3) parts[2] else ""
