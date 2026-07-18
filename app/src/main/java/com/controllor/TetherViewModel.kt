@@ -348,6 +348,9 @@ class TetherViewModel : ViewModel() {
                     } catch (e: Exception) {
                         errorCount++
                         Log.d("Tether", "连接 $ip 失败: ${e.message}")
+                        if (ip == "192.168.10.10") {
+                            Log.d("Tether", "=== 详细异常 ===")
+                            e.printStackTrace()
                     }
                 }
                 jobs.add(job)
