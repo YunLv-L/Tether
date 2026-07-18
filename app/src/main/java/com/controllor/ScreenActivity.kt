@@ -10,7 +10,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -18,7 +18,7 @@ import kotlinx.coroutines.withContext
 import java.io.DataInputStream
 import java.net.Socket
 
-class ScreenActivity : AppCompatActivity() {
+class ScreenActivity : ComponentActivity() {
     private lateinit var surfaceView: SurfaceView
     private lateinit var tvStatus: TextView
     private var socket: Socket? = null
