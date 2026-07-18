@@ -36,10 +36,12 @@ class TetherViewModel : ViewModel() {
         _statusMessage.value = "正在扫描..."
 
         viewModelScope.launch {
+            var socket: DatagramSocket? = null
             try {
-                val socket = DatagramSocket(udpPort).apply {
+                socket = DatagramSocket(udpPort).apply {
                     broadcast = true
                     soTimeout = discoveryTimeout.toInt()
+                    reuseAddress = true
                 }
                 val buffer = ByteArray(1024)
                 val packet = DatagramPacket(buffer, buffer.size)
@@ -51,19 +53,21 @@ class TetherViewModel : ViewModel() {
                         socket.receive(packet)
                         val message = String(packet.data, 0, packet.length)
                         val ip = packet.address.hostAddress ?: continue
-                        if (message.startsWith("TETHER_AGENT|")) {
-                            val deviceName = message.substringAfter("|").substringBefore("|")
-                            val display = "$ip:$deviceName"
-                            if (!foundDevices.contains(display)) {
-                                foundDevices.add(display)
-                                _devices.value = foundDevices.toList()
+                        if (message.isNotBlank() && message.startsWith("TETHER_AGENT|")) {
+                            val parts = message.split("|")
+                            if (parts.size >= 2) {
+                                val deviceName = parts[1]
+                                val display = "$ip:$deviceName"
+                                if (!foundDevices.contains(display)) {
+                                    foundDevices.add(display)
+                                    _devices.value = foundDevices.toList()
+                                }
                             }
                         }
                     } catch (e: java.net.SocketTimeoutException) {
                         // 超时继续
                     }
                 }
-                socket.close()
                 _statusMessage.value = if (foundDevices.isEmpty()) {
                     "未发现设备，可手动输入 IP"
                 } else {
@@ -73,6 +77,7 @@ class TetherViewModel : ViewModel() {
                 _statusMessage.value = "扫描异常: ${e.message}"
                 Log.e("Tether", "扫描异常", e)
             } finally {
+                socket?.close()
                 _isScanning.value = false
             }
         }
@@ -93,8 +98,9 @@ class TetherViewModel : ViewModel() {
     }
 
     fun sendCommand(command: String) {
-        val device = _selectedDevice.value ?: run {
-            _statusMessage.value = "请先选择设备"
+        val device = _selectedDevice.value
+        if (device == null) {
+            _statusMessage.value = "请先选择或添加设备"
             return
         }
         val ip = device.substringBefore(":")
