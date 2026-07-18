@@ -82,12 +82,12 @@ public partial class MainForm : Form
             this.ShowInTaskbar = false;
             return;
         }
-        
+
         _isRunning = false;
         _tcpListener?.Stop();
         _screenListener?.Stop();
         _qualityListener?.Stop();
-        
+
         if (_udpThread != null && _udpThread.IsAlive)
             _udpThread.Join(1000);
         if (_tcpThread != null && _tcpThread.IsAlive)
@@ -98,7 +98,7 @@ public partial class MainForm : Form
             _qualityThread.Join(1000);
         if (_mdnsThread != null && _mdnsThread.IsAlive)
             _mdnsThread.Join(1000);
-        
+
         _trayIcon?.Dispose();
     }
 
@@ -140,17 +140,22 @@ public partial class MainForm : Form
             // CPU 信息
             try
             {
-                info.Append(Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString", "")?.ToString() ?? "");
-                info.Append(Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0", "Identifier", "")?.ToString() ?? "");
+                string cpu = Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString", "")?.ToString() ?? "";
+                info.Append(cpu);
+                string cpuId = Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0", "Identifier", "")?.ToString() ?? "";
+                info.Append(cpuId);
             }
             catch { }
 
             // 主板信息
             try
             {
-                info.Append(Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\BIOS", "BaseBoardManufacturer", "")?.ToString() ?? "");
-                info.Append(Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\BIOS", "BaseBoardProduct", "")?.ToString() ?? "");
-                info.Append(Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\BIOS", "SystemSerialNumber", "")?.ToString() ?? "");
+                string boardManu = Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\BIOS", "BaseBoardManufacturer", "")?.ToString() ?? "";
+                info.Append(boardManu);
+                string boardProduct = Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\BIOS", "BaseBoardProduct", "")?.ToString() ?? "";
+                info.Append(boardProduct);
+                string boardSerial = Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\BIOS", "SystemSerialNumber", "")?.ToString() ?? "";
+                info.Append(boardSerial);
             }
             catch { }
 
@@ -158,7 +163,7 @@ public partial class MainForm : Form
             try
             {
                 var mac = NetworkInterface.GetAllNetworkInterfaces()
-                    .FirstOrDefault(n => n.OperationalStatus == OperationalStatus.Up && 
+                    .FirstOrDefault(n => n.OperationalStatus == OperationalStatus.Up &&
                                         n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
                     ?.GetPhysicalAddress()?.ToString() ?? "";
                 info.Append(mac);
@@ -168,14 +173,17 @@ public partial class MainForm : Form
             // 系统 UUID
             try
             {
-                info.Append(Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography", "MachineGuid", "")?.ToString() ?? "");
+                string guid = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography", "MachineGuid", "")?.ToString() ?? "";
+                info.Append(guid);
             }
             catch { }
 
-            var bytes = Encoding.UTF8.GetBytes(info.ToString());
-            using var sha = SHA256.Create();
-            var hash = sha.ComputeHash(bytes);
-            return Convert.ToBase64String(hash).Replace("/", "_").Replace("+", "-").Substring(0, 16);
+            byte[] bytes = Encoding.UTF8.GetBytes(info.ToString());
+            using (var sha = SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(bytes);
+                return Convert.ToBase64String(hash).Replace("/", "_").Replace("+", "-").Substring(0, 16);
+            }
         }
         catch
         {
@@ -200,7 +208,7 @@ public partial class MainForm : Form
                         var endpoint = new IPEndPoint(IPAddress.Any, 0);
                         var data = udpClient.Receive(ref endpoint);
                         string query = Encoding.UTF8.GetString(data);
-                        
+
                         if (query.Contains("_tether._tcp") || query.Contains("TETHER"))
                         {
                             string response = $"TETHER_SERVICE|{_deviceName}|{_ipAddress}|{_machineCode}\n";
@@ -321,7 +329,7 @@ public partial class MainForm : Form
         }
         catch (Exception ex)
         {
-            return $"执行失败: {ex.Message}");
+            return $"执行失败: {ex.Message}";
         }
     }
 
@@ -487,7 +495,7 @@ public partial class MainForm : Form
         long hash = 0;
         int step = Math.Max(bitmap.Width / 40, 1);
         int stepY = Math.Max(bitmap.Height / 30, 1);
-        
+
         for (int y = 0; y < bitmap.Height; y += stepY)
         {
             for (int x = 0; x < bitmap.Width; x += step)
@@ -594,7 +602,7 @@ public partial class MainForm : Form
                 {
                     var codec = ImageCodecInfo.GetImageEncoders()
                         .FirstOrDefault(c => c.FormatID == ImageFormat.Jpeg.Guid);
-                    
+
                     if (codec == null)
                     {
                         finalBitmap.Save(ms, ImageFormat.Png);
