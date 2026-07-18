@@ -57,7 +57,7 @@ fun TetherApp(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { viewModel.startDiscovery() },
+                onClick = { viewModel.tcpScanNetwork() },
                 icon = {
                     if (isScanning) {
                         CircularProgressIndicator(
