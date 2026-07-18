@@ -53,6 +53,9 @@ class TetherViewModel : ViewModel() {
     private val _debugInfo = MutableStateFlow("")
     val debugInfo: StateFlow<String> = _debugInfo
 
+    private val _quality = MutableStateFlow(1) // 0=流畅, 1=标准, 2=高清
+    val quality: StateFlow<Int> = _quality
+
     private val udpPort = 5555
     private val tcpPort = 5556
     private val discoveryTimeout = 3000L
@@ -60,6 +63,45 @@ class TetherViewModel : ViewModel() {
 
     private var scanJob: Job? = null
     private var machineCodeCache: String? = null
+    private lateinit var prefs: android.content.SharedPreferences
+
+    // ==================== 初始化 ====================
+    fun init(context: Context) {
+        prefs = context.getSharedPreferences("tether_devices", Context.MODE_PRIVATE)
+        loadDevices()
+        _quality.value = prefs.getInt("quality", 1)
+    }
+
+    // ==================== 持久化存储 ====================
+    private fun saveDevices() {
+        val json = _devices.value.map { device ->
+            "${device.ip}|${device.name}|${device.machineCode}|${device.isManual}|${device.note}"
+        }.joinToString(";;;")
+        prefs.edit().putString("devices", json).apply()
+    }
+
+    private fun loadDevices() {
+        val json = prefs.getString("devices", "") ?: ""
+        if (json.isEmpty()) return
+        val loaded = json.split(";;;").mapNotNull { entry ->
+            val parts = entry.split("|")
+            if (parts.size >= 5) {
+                DeviceInfo(
+                    ip = parts[0],
+                    name = parts[1],
+                    machineCode = parts[2],
+                    isManual = parts[3].toBoolean(),
+                    note = parts[4]
+                )
+            } else null
+        }
+        _devices.value = loaded
+    }
+
+    fun setQuality(level: Int) {
+        _quality.value = level
+        prefs.edit().putInt("quality", level).apply()
+    }
 
     // ==================== 机器码生成 ====================
     fun generateMachineCode(context: Context): String {
@@ -132,6 +174,7 @@ class TetherViewModel : ViewModel() {
         info.appendLine("网段: ${getLocalIpBase()}.x")
         info.appendLine("TCP 端口: $tcpPort")
         info.appendLine("UDP 端口: $udpPort")
+        info.appendLine("画质: ${when(_quality.value) { 0 -> "流畅"; 1 -> "标准"; else -> "高清" }}")
         info.appendLine("━━━━━━━━━━━━━━━━━")
         _devices.value.forEachIndexed { index, device ->
             info.appendLine("[${index + 1}] ${device.ip} | ${device.name} | MC: ${device.machineCode.take(16)}...")
@@ -184,6 +227,7 @@ class TetherViewModel : ViewModel() {
                                         foundDevices.add(display)
                                         withContext(Dispatchers.Main) {
                                             _devices.value = foundDevices.toList()
+                                            saveDevices()
                                         }
                                     }
                                 }
@@ -226,7 +270,7 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    // ==================== TCP 并行扫描（进度一个一个加） ====================
+    // ==================== TCP 并行扫描 ====================
     fun tcpScanNetwork() {
         if (_isScanning.value) {
             stopScan()
@@ -246,7 +290,6 @@ class TetherViewModel : ViewModel() {
 
                 Log.d("Tether", "开始并行 TCP 扫描网段: $baseIp.*")
 
-                // 每批并发 20 个
                 for (batchStart in 1..total step 20) {
                     if (!_isScanning.value) {
                         Log.d("Tether", "扫描被用户暂停")
@@ -271,9 +314,10 @@ class TetherViewModel : ViewModel() {
                                     val len = input.read(buffer)
                                     if (len > 0) {
                                         val response = String(buffer, 0, len)
+                                        Log.d("Tether", "收到响应: '$response' from $ip")
                                         if (response.startsWith("pong")) {
                                             val parts = response.split("|")
-                                            val deviceName = if (parts.size >= 2) parts[1] else "PC"
+                                            val deviceName = if (parts.size >= 2 && parts[1].isNotEmpty()) parts[1] else "PC"
                                             val machineCode = if (parts.size >= 3) parts[2] else ""
                                             val display = DeviceInfo(
                                                 ip = ip,
@@ -285,6 +329,7 @@ class TetherViewModel : ViewModel() {
                                                 withContext(Dispatchers.Main) {
                                                     _devices.value = foundDevices.toList()
                                                     _statusMessage.value = "发现设备: $display"
+                                                    saveDevices()
                                                 }
                                             }
                                         }
@@ -294,7 +339,6 @@ class TetherViewModel : ViewModel() {
                                 // 连接失败，跳过
                             }
 
-                            // 每扫描一个 IP 就更新进度
                             withContext(Dispatchers.Main) {
                                 scannedCount++
                                 _scanProgress.value = "${scannedCount}/254"
@@ -303,7 +347,6 @@ class TetherViewModel : ViewModel() {
                         batchJobs.add(job)
                     }
 
-                    // 等待当前批次完成
                     batchJobs.forEach { it.join() }
                 }
 
@@ -333,6 +376,7 @@ class TetherViewModel : ViewModel() {
     fun deleteDevice(device: DeviceInfo) {
         val newList = _devices.value.filter { it.ip != device.ip }
         _devices.value = newList
+        saveDevices()
         if (_selectedDevice.value?.ip == device.ip) {
             _selectedDevice.value = if (newList.isNotEmpty()) newList.first() else null
         }
@@ -352,6 +396,7 @@ class TetherViewModel : ViewModel() {
         val newDevice = oldDevice.copy(ip = newIp)
         val newList = _devices.value.map { if (it.ip == oldDevice.ip) newDevice else it }
         _devices.value = newList
+        saveDevices()
         if (_selectedDevice.value?.ip == oldDevice.ip) {
             _selectedDevice.value = newDevice
         }
@@ -363,6 +408,7 @@ class TetherViewModel : ViewModel() {
         val newDevice = device.copy(note = note)
         val newList = _devices.value.map { if (it.ip == device.ip) newDevice else it }
         _devices.value = newList
+        saveDevices()
         if (_selectedDevice.value?.ip == device.ip) {
             _selectedDevice.value = newDevice
         }
@@ -403,9 +449,12 @@ class TetherViewModel : ViewModel() {
 
     // ==================== 手动添加设备 ====================
     fun addManualDevice(ip: String) {
+        Log.d("Tether", "addManualDevice 被调用, ip=$ip")
         val display = DeviceInfo(ip = ip, name = "手动连接", isManual = true)
         if (!_devices.value.any { it.ip == ip }) {
             _devices.value = _devices.value + display
+            Log.d("Tether", "设备已添加, 当前数量: ${_devices.value.size}")
+            saveDevices()
         }
         _selectedDevice.value = display
         _statusMessage.value = "已添加设备: $ip"
@@ -413,6 +462,7 @@ class TetherViewModel : ViewModel() {
 
     // ==================== 选择设备 ====================
     fun selectDevice(device: DeviceInfo) {
+        Log.d("Tether", "selectDevice 被调用, device=${device.ip}")
         _selectedDevice.value = device
         _statusMessage.value = "已选择: ${device.ip}"
     }

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="quality_options">
+        <item>流畅</item>
+        <item>标准</item>
+        <item>高清</item>
+    </string-array>
+</resources>
