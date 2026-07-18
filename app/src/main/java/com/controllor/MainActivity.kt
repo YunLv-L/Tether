@@ -1,5 +1,6 @@
 package com.tether.controller
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -25,7 +27,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             TetherTheme {
-                TetherApp()
+                val viewModel: TetherViewModel = viewModel()
+                LaunchedEffect(Unit) {
+                    viewModel.init(applicationContext)
+                }
+                TetherApp(viewModel = viewModel)
             }
         }
     }
@@ -44,13 +50,14 @@ fun TetherApp(
     val isDebugMode by viewModel.isDebugMode.collectAsState()
     val debugInfo by viewModel.debugInfo.collectAsState()
 
+    val context = LocalContext.current
+
     var showDeleteDialog by remember { mutableStateOf<DeviceInfo?>(null) }
     var showEditDialog by remember { mutableStateOf<DeviceInfo?>(null) }
     var showNoteDialog by remember { mutableStateOf<DeviceInfo?>(null) }
 
     var headerClickCount by remember { mutableStateOf(0) }
     var headerClickStartTime by remember { mutableStateOf(0L) }
-    var lastHeaderClickTime by remember { mutableStateOf(0L) }
 
     Scaffold(
         topBar = {
@@ -320,6 +327,26 @@ fun TetherApp(
                     )
                 ) {
                     Text("⏻ 关机")
+                }
+            }
+
+            // ===== 查看画面按钮 =====
+            if (selectedDevice != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        val ip = selectedDevice?.ip ?: return@Button
+                        val intent = Intent(context, ScreenActivity::class.java)
+                        intent.putExtra("ip", ip)
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary
+                    )
+                ) {
+                    Text("🖥️ 查看画面")
                 }
             }
 

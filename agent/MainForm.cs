@@ -3,6 +3,8 @@ using System.Net.Sockets;
 using System.Text;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
+using System.Drawing.Imaging;
 
 namespace TetherAgent;
 
@@ -18,41 +20,37 @@ public partial class MainForm : Form
     // ===== 配置 =====
     private const int UDP_PORT = 5555;
     private const int TCP_PORT = 5556;
-    private const string BROADCAST_IP = "255.255.255.255";
+    private const int SCREEN_PORT = 5557;
     private const int BROADCAST_DURATION = 10;
 
     private readonly string _deviceName = Environment.MachineName;
     private readonly string _ipAddress = GetLocalIP();
     private TcpListener? _tcpListener;
+    private TcpListener? _screenListener;
     private bool _isRunning = true;
     private NotifyIcon? _trayIcon;
     private Thread? _udpThread;
+    private Thread? _tcpThread;
+    private Thread? _screenThread;
+    private bool _isStreaming = false;
 
     public MainForm()
     {
         InitializeComponent();
         SetupTrayIcon();
-        UpdateStatus("正在启动...", false);
         Load += MainForm_Load;
         FormClosing += MainForm_FormClosing;
+        // 开机自启默认状态
+        UpdateAutoStartStatus();
     }
 
     private void MainForm_Load(object? sender, EventArgs e)
     {
-        // 显示设备信息
         lblDeviceName.Text = _deviceName;
         lblIP.Text = _ipAddress;
-        lblPort.Text = TCP_PORT.ToString();
-        lblStatus.Text = "● 运行中";
-        lblStatus.ForeColor = Color.FromArgb(74, 222, 128); // 绿色
-
-        // 启动服务
         StartServices();
-
-        // 最小化到托盘（启动时不显示主窗口）
         this.WindowState = FormWindowState.Minimized;
         this.ShowInTaskbar = false;
-        UpdateStatus("后台运行中", true);
     }
 
     private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
@@ -64,43 +62,42 @@ public partial class MainForm : Form
             this.ShowInTaskbar = false;
             return;
         }
+        
         _isRunning = false;
         _tcpListener?.Stop();
+        _screenListener?.Stop();
         
-        // 不使用 Abort，改用 Join 等待线程自然结束
         if (_udpThread != null && _udpThread.IsAlive)
-        {
-            _udpThread.Join(1000);  // 等待1秒
-        }
+            _udpThread.Join(1000);
+        if (_tcpThread != null && _tcpThread.IsAlive)
+            _tcpThread.Join(1000);
+        if (_screenThread != null && _screenThread.IsAlive)
+            _screenThread.Join(1000);
         
         _trayIcon?.Dispose();
     }
 
-    // ===== 启动服务 =====
+    // ==================== 启动服务 ====================
     private void StartServices()
     {
-        // UDP 广播
-        _udpThread = new Thread(UdpBroadcastLoop)
-        {
-            IsBackground = true,
-            Name = "UDP_Broadcast"
-        };
+        _udpThread = new Thread(UdpBroadcastLoop) { IsBackground = true };
         _udpThread.Start();
 
-        // TCP 服务
-        Thread tcpThread = new Thread(StartTcpServer)
-        {
-            IsBackground = true,
-            Name = "TCP_Server"
-        };
-        tcpThread.Start();
+        _tcpThread = new Thread(StartTcpServer) { IsBackground = true };
+        _tcpThread.Start();
 
-        AppendLog("[服务] UDP 广播已启动");
-        AppendLog($"[服务] TCP 服务监听端口 {TCP_PORT}");
-        AppendLog($"[服务] 设备: {_deviceName} | IP: {_ipAddress}");
+        _screenThread = new Thread(ScreenStreamLoop) { IsBackground = true };
+        _screenThread.Start();
+
+        AppendLog("🚀 服务已启动");
+        AppendLog($"📡 UDP 广播端口: {UDP_PORT}");
+        AppendLog($"🔌 TCP 指令端口: {TCP_PORT}");
+        AppendLog($"🖥️ 画面传输端口: {SCREEN_PORT}");
+        AppendLog($"💻 设备: {_deviceName}");
+        AppendLog($"📶 IP: {_ipAddress}");
     }
 
-    // ===== UDP 广播 =====
+    // ==================== UDP 广播 ====================
     private void UdpBroadcastLoop()
     {
         try
@@ -118,18 +115,18 @@ public partial class MainForm : Form
             {
                 udpClient.Send(data, data.Length, endpoint);
                 count++;
-                AppendLog($"[UDP] 广播 #{count}");
+                AppendLog($"📡 广播 #{count}");
                 Thread.Sleep(2000);
             }
-            AppendLog("[UDP] 广播结束 (TCP 服务持续运行)");
+            AppendLog("📡 广播结束 (TCP 服务持续运行)");
         }
         catch (Exception ex)
         {
-            AppendLog($"[UDP] 错误: {ex.Message}");
+            AppendLog($"❌ UDP 错误: {ex.Message}");
         }
     }
 
-    // ===== TCP 服务 =====
+    // ==================== TCP 指令服务 ====================
     private void StartTcpServer()
     {
         try
@@ -145,7 +142,7 @@ public partial class MainForm : Form
         }
         catch (Exception ex)
         {
-            AppendLog($"[TCP] 服务异常: {ex.Message}");
+            AppendLog($"❌ TCP 异常: {ex.Message}");
         }
     }
 
@@ -164,9 +161,9 @@ public partial class MainForm : Form
                 if (bytesRead > 0)
                 {
                     string command = Encoding.UTF8.GetString(buffer, 0, bytesRead).Trim().ToLower();
-                    AppendLog($"[指令] 收到: {command} (来自 {client.Client.RemoteEndPoint})");
+                    AppendLog($"📨 指令: {command} ({client.Client.RemoteEndPoint})");
                     string result = ExecuteCommand(command);
-                    AppendLog($"[执行] 结果: {result}");
+                    AppendLog($"✅ 执行: {result}");
 
                     byte[] response = Encoding.UTF8.GetBytes($"{result}\n");
                     stream.Write(response, 0, response.Length);
@@ -176,28 +173,21 @@ public partial class MainForm : Form
         }
         catch (Exception ex)
         {
-            AppendLog($"[TCP] 处理异常: {ex.Message}");
+            AppendLog($"❌ 处理异常: {ex.Message}");
         }
     }
 
-    // ===== 执行指令 =====
     private string ExecuteCommand(string command)
     {
         try
         {
             switch (command)
             {
-                case "lock":
-                    return LockWorkStation() ? "已锁定" : "锁定失败";
-                case "sleep":
-                    return SetSuspendState(false, true, false) ? "正在睡眠" : "睡眠失败";
-                case "shutdown":
-                    Process.Start("shutdown", "/s /t 3");
-                    return "正在关机 (3秒后)";
-                case "ping":
-                    return "pong";
-                default:
-                    return $"未知指令: {command}";
+                case "lock": return LockWorkStation() ? "已锁定" : "锁定失败";
+                case "sleep": return SetSuspendState(false, true, false) ? "正在睡眠" : "睡眠失败";
+                case "shutdown": Process.Start("shutdown", "/s /t 3"); return "正在关机 (3秒后)";
+                case "ping": return "pong";
+                default: return $"未知指令: {command}";
             }
         }
         catch (Exception ex)
@@ -206,7 +196,148 @@ public partial class MainForm : Form
         }
     }
 
-    // ===== 工具方法 =====
+    // ==================== 画面传输（TCP 推流） ====================
+    private void ScreenStreamLoop()
+    {
+        try
+        {
+            _screenListener = new TcpListener(IPAddress.Any, SCREEN_PORT);
+            _screenListener.Start();
+
+            while (_isRunning)
+            {
+                var client = _screenListener.AcceptTcpClient();
+                ThreadPool.QueueUserWorkItem(HandleScreenClient, client);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"❌ 画面传输异常: {ex.Message}");
+        }
+    }
+
+    private void HandleScreenClient(object? state)
+    {
+        if (state is not TcpClient client) return;
+
+        try
+        {
+            using (client)
+            using (var stream = client.GetStream())
+            {
+                client.ReceiveTimeout = 5000;
+                client.SendTimeout = 5000;
+
+                // 发送屏幕尺寸
+                var bounds = Screen.PrimaryScreen.Bounds;
+                var sizeInfo = $"{bounds.Width}|{bounds.Height}\n";
+                byte[] sizeData = Encoding.UTF8.GetBytes(sizeInfo);
+                stream.Write(sizeData, 0, sizeData.Length);
+                stream.Flush();
+                AppendLog($"🖥️ 画面客户端连接: {client.Client.RemoteEndPoint} ({bounds.Width}x{bounds.Height})");
+
+                // 持续推流
+                while (_isRunning && client.Connected)
+                {
+                    var imageData = CaptureScreen();
+                    if (imageData == null) continue;
+
+                    // 发送长度(4字节) + 图像数据
+                    byte[] lengthBytes = BitConverter.GetBytes(imageData.Length);
+                    stream.Write(lengthBytes, 0, 4);
+                    stream.Write(imageData, 0, imageData.Length);
+                    stream.Flush();
+
+                    // 限制帧率 ~30fps
+                    Thread.Sleep(33);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"❌ 画面传输断开: {ex.Message}");
+        }
+    }
+
+    private byte[]? CaptureScreen()
+    {
+        try
+        {
+            var bounds = Screen.PrimaryScreen.Bounds;
+            using (var bitmap = new Bitmap(bounds.Width, bounds.Height))
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size);
+                using (var ms = new MemoryStream())
+                {
+                    var codec = ImageCodecInfo.GetImageEncoders()
+                        .FirstOrDefault(c => c.FormatID == ImageFormat.Jpeg.Guid);
+                    var encoderParams = new EncoderParameters(1);
+                    encoderParams.Param[0] = new EncoderParameter(Encoder.Quality, 85L);
+                    bitmap.Save(ms, codec, encoderParams);
+                    return ms.ToArray();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"❌ 截屏失败: {ex.Message}");
+            return null;
+        }
+    }
+
+    // ==================== 开机自启 ====================
+    private const string REGISTRY_RUN_KEY = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
+    private const string APP_NAME = "TetherAgent";
+
+    private void UpdateAutoStartStatus()
+    {
+        if (InvokeRequired)
+        {
+            Invoke(() => UpdateAutoStartStatus());
+            return;
+        }
+        // 在UI上显示状态（如果有CheckBox或Label的话）
+    }
+
+    private bool IsAutoStartEnabled()
+    {
+        try
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(REGISTRY_RUN_KEY))
+            {
+                return key?.GetValue(APP_NAME) != null;
+            }
+        }
+        catch { return false; }
+    }
+
+    private void SetAutoStart(bool enable)
+    {
+        try
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(REGISTRY_RUN_KEY, true))
+            {
+                if (enable)
+                {
+                    var exePath = Application.ExecutablePath;
+                    key?.SetValue(APP_NAME, $"\"{exePath}\"");
+                    AppendLog("🔁 开机自启已启用");
+                }
+                else
+                {
+                    key?.DeleteValue(APP_NAME, false);
+                    AppendLog("🔁 开机自启已关闭");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"❌ 开机自启设置失败: {ex.Message}");
+        }
+    }
+
+    // ==================== 工具方法 ====================
     private static string GetLocalIP()
     {
         try
@@ -232,36 +363,36 @@ public partial class MainForm : Form
         txtLog.ScrollToCaret();
     }
 
-    private void UpdateStatus(string text, bool isConnected)
-    {
-        if (lblStatus.InvokeRequired)
-        {
-            lblStatus.Invoke(() => UpdateStatus(text, isConnected));
-            return;
-        }
-        lblStatus.Text = isConnected ? "● 运行中" : "● 未连接";
-        lblStatus.ForeColor = isConnected ? Color.FromArgb(74, 222, 128) : Color.FromArgb(248, 113, 113);
-    }
-
-    // ===== 托盘 =====
     private void SetupTrayIcon()
     {
         _trayIcon = new NotifyIcon
         {
             Icon = SystemIcons.Application,
-            Text = $"Tether Agent\n设备: {_deviceName}",
+            Text = $"Tether Agent\n{_deviceName}\n{_ipAddress}",
             Visible = true
         };
 
         ContextMenuStrip menu = new ContextMenuStrip();
-        menu.Items.Add("显示主窗口", null, (s, e) =>
+
+        var autoStartItem = new ToolStripMenuItem("🔁 开机自启");
+        autoStartItem.Checked = IsAutoStartEnabled();
+        autoStartItem.Click += (s, e) =>
+        {
+            bool newState = !autoStartItem.Checked;
+            SetAutoStart(newState);
+            autoStartItem.Checked = newState;
+        };
+        menu.Items.Add(autoStartItem);
+
+        menu.Items.Add("-");
+        menu.Items.Add("🖥️ 显示主窗口", null, (s, e) =>
         {
             this.WindowState = FormWindowState.Normal;
             this.ShowInTaskbar = true;
             this.BringToFront();
         });
         menu.Items.Add("-");
-        menu.Items.Add("退出", null, (s, e) =>
+        menu.Items.Add("❌ 退出", null, (s, e) =>
         {
             _isRunning = false;
             _trayIcon?.Dispose();
