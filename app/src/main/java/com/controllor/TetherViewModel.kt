@@ -63,7 +63,7 @@ class TetherViewModel : ViewModel() {
     private val udpPort = 5555
     private val tcpPort = 5556
     private val qualityPort = 5558
-    private val tcpTimeout = 500
+    private val tcpTimeout = 800
 
     private var scanJob: Job? = null
     private lateinit var prefs: android.content.SharedPreferences
@@ -279,26 +279,26 @@ class TetherViewModel : ViewModel() {
         return found
     }
 
-    // ==================== TCP 深度扫描（平滑进度更新） ====================
+    // ==================== TCP 深度扫描（完整日志 + 硬编码网段测试） ====================
     private suspend fun performTcpDiscovery(foundDevices: MutableMap<String, DeviceInfo>) {
-        val baseIp = getLocalIpBase()
+        // 临时硬编码测试，确认网段问题
+        val baseIp = "192.168.10"
         val total = 254
         var scannedCount = 0
+        var foundCount = 0
 
         Log.d("Tether", "========== TCP 扫描开始 ==========")
-        Log.d("Tether", "网段: $baseIp.*")
+        Log.d("Tether", "扫描网段: $baseIp.*")
+        Log.d("Tether", "当前扫描状态: ${_isScanning.value}")
 
-        // 重置进度
         withContext(Dispatchers.Main) {
             _scanProgress.value = "0/254"
+            _statusMessage.value = "开始 TCP 扫描 $baseIp.*"
         }
-
-        var lastUpdateTime = System.currentTimeMillis()
-        val minUpdateInterval = 100L
 
         for (i in 1..total) {
             if (!_isScanning.value) {
-                Log.d("Tether", "扫描被中断")
+                Log.d("Tether", "⚠️ 扫描被中断，当前进度: $scannedCount/254, 已发现: $foundCount")
                 break
             }
 
@@ -317,6 +317,7 @@ class TetherViewModel : ViewModel() {
                     if (len > 0) {
                         val response = String(buffer, 0, len)
                         if (response.startsWith("pong")) {
+                            foundCount++
                             val parts = response.split("|")
                             val deviceName = if (parts.size >= 2 && parts[1].isNotEmpty()) parts[1] else "PC"
                             val machineCode = if (parts.size >= 4) parts[3] else ""
@@ -331,25 +332,27 @@ class TetherViewModel : ViewModel() {
                             synchronized(foundDevices) {
                                 foundDevices[id] = device
                             }
+                            Log.d("Tether", "✅ 发现设备: $ip ($deviceName)")
                             withContext(Dispatchers.Main) {
                                 _statusMessage.value = "发现设备: $ip:$deviceName (TCP)"
+                                _devices.value = foundDevices.values.map { it.copy(isOnline = true) }.toMutableList()
                             }
                         }
                     }
                 }
-            } catch (e: Exception) { /* 跳过 */ }
+            } catch (e: Exception) {
+                // 连接失败，跳过
+            }
 
             scannedCount++
 
-            // 控制 UI 更新频率（每 5 个 IP 或至少 100ms 更新一次）
-            val now = System.currentTimeMillis()
-            if (scannedCount % 5 == 0 || scannedCount == total || now - lastUpdateTime >= minUpdateInterval) {
-                lastUpdateTime = now
+            // 每 5 个 IP 更新一次进度
+            if (scannedCount % 5 == 0 || scannedCount == total) {
                 withContext(Dispatchers.Main) {
                     _scanProgress.value = "${scannedCount}/254"
                 }
-                // 给 UI 一点时间刷新
-                if (scannedCount % 10 == 0) {
+                if (scannedCount % 20 == 0) {
+                    Log.d("Tether", "扫描进度: $scannedCount/254, 已发现: $foundCount")
                     delay(30)
                 }
             }
@@ -362,7 +365,7 @@ class TetherViewModel : ViewModel() {
 
         Log.d("Tether", "========== TCP 扫描完成 ==========")
         Log.d("Tether", "最终进度: $scannedCount/254")
-        Log.d("Tether", "发现设备数: ${foundDevices.size}")
+        Log.d("Tether", "发现设备数: $foundCount")
     }
 
     fun stopScan() {
