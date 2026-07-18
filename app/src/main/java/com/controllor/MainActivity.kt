@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
             TetherTheme {
                 val viewModel: TetherViewModel = viewModel()
                 LaunchedEffect(Unit) {
-                    // 持久化存储已由 ViewModel 内部管理
+                    viewModel.init(applicationContext)
                 }
                 TetherApp(viewModel = viewModel)
             }
@@ -58,6 +58,11 @@ fun TetherApp(
 
     var headerClickCount by remember { mutableStateOf(0) }
     var headerClickStartTime by remember { mutableStateOf(0L) }
+
+    // 调试日志
+    LaunchedEffect(selectedDevice) {
+        android.util.Log.d("Tether", "selectedDevice 变化: $selectedDevice")
+    }
 
     Scaffold(
         topBar = {
@@ -228,6 +233,7 @@ fun TetherApp(
                                         showDeleteDialog = device
                                     },
                                     onClick = {
+                                        android.util.Log.d("Tether", "点击设备: ${device.ip}")
                                         viewModel.selectDevice(device)
                                     }
                                 ),
@@ -330,7 +336,7 @@ fun TetherApp(
                 }
             }
 
-            // ===== 查看画面按钮 =====
+            // ===== 查看画面按钮（选中设备后才显示） =====
             if (selectedDevice != null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
