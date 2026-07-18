@@ -32,7 +32,6 @@ public partial class MainForm : Form
     private Thread? _udpThread;
     private Thread? _tcpThread;
     private Thread? _screenThread;
-    private bool _isStreaming = false;
 
     public MainForm()
     {
@@ -40,7 +39,6 @@ public partial class MainForm : Form
         SetupTrayIcon();
         Load += MainForm_Load;
         FormClosing += MainForm_FormClosing;
-        // 开机自启默认状态
         UpdateAutoStartStatus();
     }
 
@@ -273,7 +271,10 @@ public partial class MainForm : Form
                     var codec = ImageCodecInfo.GetImageEncoders()
                         .FirstOrDefault(c => c.FormatID == ImageFormat.Jpeg.Guid);
                     var encoderParams = new EncoderParameters(1);
-                    encoderParams.Param[0] = new EncoderParameter(Encoder.Quality, 85L);
+                    encoderParams.Param[0] = new EncoderParameter(
+                        System.Drawing.Imaging.Encoder.Quality,
+                        85
+                    );
                     bitmap.Save(ms, codec, encoderParams);
                     return ms.ToArray();
                 }
@@ -292,11 +293,6 @@ public partial class MainForm : Form
 
     private void UpdateAutoStartStatus()
     {
-        if (InvokeRequired)
-        {
-            Invoke(() => UpdateAutoStartStatus());
-            return;
-        }
         // 在UI上显示状态（如果有CheckBox或Label的话）
     }
 

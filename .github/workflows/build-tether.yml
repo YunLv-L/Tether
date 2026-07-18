@@ -3,8 +3,14 @@ name: Build Tether APK
 on:
   workflow_dispatch:
   push:
+    paths:
+      - 'app/**'
+      - '.github/workflows/build-tether.yml'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradle/libs.versions.toml'
     branches: [ "main", "master" ]
-    tags: [ "v*" ]
 
 jobs:
   build:
@@ -26,10 +32,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      # 多架构适配：将单 ABI 替换为全平台
       - name: Adapt ABI filters for Multi-Architecture
         run: |
-          # 适配 Kotlin DSL 语法
           sed -i 's/abiFilters\.add("arm64-v8a")/abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))/' app/build.gradle.kts
           echo "✅ ABI filters updated to: armeabi-v7a, arm64-v8a, x86, x86_64"
           grep -A 2 "abiFilters" app/build.gradle.kts || true
@@ -38,17 +42,16 @@ jobs:
         env:
           SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
         run: |
-          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > app/keystore.p12
-          echo "✅ Keystore decoded (PKCS12)."
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > app/keystore.jks
+          echo "✅ Keystore decoded."
 
       - name: Build Release APK
         run: |
           gradle assembleRelease \
-            -Pandroid.injected.signing.store.file=$(pwd)/app/keystore.p12 \
+            -Pandroid.injected.signing.store.file=$(pwd)/app/keystore.jks \
             -Pandroid.injected.signing.store.password=${{ secrets.SIGNING_KEYSTORE_PASSWORD }} \
             -Pandroid.injected.signing.key.alias=${{ secrets.SIGNING_KEY_ALIAS }} \
-            -Pandroid.injected.signing.key.password=${{ secrets.SIGNING_KEY_PASSWORD }} \
-            -Pandroid.injected.signing.store.type=PKCS12
+            -Pandroid.injected.signing.key.password=${{ secrets.SIGNING_KEY_PASSWORD }}
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
@@ -57,7 +60,6 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
           retention-days: 30
 
-      # ---------- 美化后的邮件通知（简洁卡片风格） ----------
       - name: Send build status email via Resend
         if: always()
         env:
@@ -75,8 +77,6 @@ jobs:
           else
             STATUS_EMOJI="❌"
           fi
-
-          # 截取短提交哈希（前 7 位）
           SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
 
           HTML_BODY=$(cat <<EOF
