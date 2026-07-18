@@ -1,11 +1,13 @@
 package com.tether.controller.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 
-// MD3 深色主题（用色调调色板自动生成）
+// MD3 深色主题
 private val DarkColorScheme = darkColorScheme(
     primary = Color(0xFF3B82F6),
     onPrimary = Color(0xFFFFFFFF),
