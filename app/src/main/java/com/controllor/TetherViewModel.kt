@@ -63,7 +63,7 @@ class TetherViewModel : ViewModel() {
     private val udpPort = 5555
     private val tcpPort = 5556
     private val qualityPort = 5558
-    private val tcpTimeout = 800
+    private val tcpTimeout = 2000
 
     private var scanJob: Job? = null
     private lateinit var prefs: android.content.SharedPreferences
@@ -279,86 +279,90 @@ class TetherViewModel : ViewModel() {
         return found
     }
 
-    // ==================== TCP 深度扫描（完整日志 + 硬编码网段测试） ====================
+    // ==================== TCP 深度扫描（并行 + 超时 2000ms） ====================
     private suspend fun performTcpDiscovery(foundDevices: MutableMap<String, DeviceInfo>) {
-        // 临时硬编码测试，确认网段问题
-        val baseIp = "192.168.10"
+        val baseIp = getLocalIpBase()
         val total = 254
         var scannedCount = 0
         var foundCount = 0
 
         Log.d("Tether", "========== TCP 扫描开始 ==========")
         Log.d("Tether", "扫描网段: $baseIp.*")
-        Log.d("Tether", "当前扫描状态: ${_isScanning.value}")
+        Log.d("Tether", "超时设置: ${tcpTimeout}ms")
 
         withContext(Dispatchers.Main) {
             _scanProgress.value = "0/254"
             _statusMessage.value = "开始 TCP 扫描 $baseIp.*"
         }
 
-        for (i in 1..total) {
+        // 每批 10 个 IP 并行扫描
+        val batchSize = 10
+        for (batchStart in 1..total step batchSize) {
             if (!_isScanning.value) {
                 Log.d("Tether", "⚠️ 扫描被中断，当前进度: $scannedCount/254, 已发现: $foundCount")
                 break
             }
+            val batchEnd = minOf(batchStart + batchSize - 1, total)
+            val jobs = mutableListOf<Job>()
 
-            val ip = "$baseIp.$i"
-            try {
-                Socket(ip, tcpPort).use { socket ->
-                    socket.soTimeout = tcpTimeout
-                    socket.tcpNoDelay = true
-                    val output: OutputStream = socket.getOutputStream()
-                    output.write("ping\n".toByteArray())
-                    output.flush()
+            for (i in batchStart..batchEnd) {
+                val ip = "$baseIp.$i"
+                val job = viewModelScope.launch {
+                    try {
+                        Socket(ip, tcpPort).use { socket ->
+                            socket.soTimeout = tcpTimeout
+                            socket.tcpNoDelay = true
+                            val output: OutputStream = socket.getOutputStream()
+                            output.write("ping\n".toByteArray())
+                            output.flush()
 
-                    val input = socket.getInputStream()
-                    val buffer = ByteArray(1024)
-                    val len = input.read(buffer)
-                    if (len > 0) {
-                        val response = String(buffer, 0, len)
-                        if (response.startsWith("pong")) {
-                            foundCount++
-                            val parts = response.split("|")
-                            val deviceName = if (parts.size >= 2 && parts[1].isNotEmpty()) parts[1] else "PC"
-                            val machineCode = if (parts.size >= 4) parts[3] else ""
-                            val id = if (machineCode.isNotEmpty()) machineCode else "$deviceName|$ip"
-                            val device = DeviceInfo(
-                                id = id,
-                                ip = ip,
-                                name = deviceName,
-                                isOnline = true,
-                                machineCode = machineCode
-                            )
-                            synchronized(foundDevices) {
-                                foundDevices[id] = device
-                            }
-                            Log.d("Tether", "✅ 发现设备: $ip ($deviceName)")
-                            withContext(Dispatchers.Main) {
-                                _statusMessage.value = "发现设备: $ip:$deviceName (TCP)"
-                                _devices.value = foundDevices.values.map { it.copy(isOnline = true) }.toMutableList()
+                            val input = socket.getInputStream()
+                            val buffer = ByteArray(1024)
+                            val len = input.read(buffer)
+                            if (len > 0) {
+                                val response = String(buffer, 0, len)
+                                if (response.startsWith("pong")) {
+                                    foundCount++
+                                    val parts = response.split("|")
+                                    val deviceName = if (parts.size >= 2 && parts[1].isNotEmpty()) parts[1] else "PC"
+                                    val machineCode = if (parts.size >= 4) parts[3] else ""
+                                    val id = if (machineCode.isNotEmpty()) machineCode else "$deviceName|$ip"
+                                    val device = DeviceInfo(
+                                        id = id,
+                                        ip = ip,
+                                        name = deviceName,
+                                        isOnline = true,
+                                        machineCode = machineCode
+                                    )
+                                    synchronized(foundDevices) {
+                                        foundDevices[id] = device
+                                    }
+                                    Log.d("Tether", "✅ 发现设备: $ip ($deviceName)")
+                                    withContext(Dispatchers.Main) {
+                                        _statusMessage.value = "发现设备: $ip:$deviceName (TCP)"
+                                        _devices.value = foundDevices.values.map { it.copy(isOnline = true) }.toMutableList()
+                                    }
+                                }
                             }
                         }
+                    } catch (e: Exception) {
+                        // 连接失败，跳过
                     }
                 }
-            } catch (e: Exception) {
-                // 连接失败，跳过
+                jobs.add(job)
             }
+            jobs.forEach { it.join() }
 
-            scannedCount++
-
-            // 每 5 个 IP 更新一次进度
-            if (scannedCount % 5 == 0 || scannedCount == total) {
-                withContext(Dispatchers.Main) {
-                    _scanProgress.value = "${scannedCount}/254"
-                }
-                if (scannedCount % 20 == 0) {
-                    Log.d("Tether", "扫描进度: $scannedCount/254, 已发现: $foundCount")
-                    delay(30)
-                }
+            scannedCount += batchSize
+            withContext(Dispatchers.Main) {
+                _scanProgress.value = "${scannedCount.coerceAtMost(254)}/254"
             }
+            if (scannedCount % 50 == 0) {
+                Log.d("Tether", "扫描进度: $scannedCount/254, 已发现: $foundCount")
+            }
+            delay(20)
         }
 
-        // 确保最终进度正确
         withContext(Dispatchers.Main) {
             _scanProgress.value = "254/254"
         }
