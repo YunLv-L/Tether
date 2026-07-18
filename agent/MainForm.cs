@@ -226,7 +226,7 @@ public partial class MainForm : Form
                             string response = $"TETHER_SERVICE|{_deviceName}|{_ipAddress}|{_machineCode}\n";
                             byte[] respData = Encoding.UTF8.GetBytes(response);
                             socket.SendTo(respData, remoteEndPoint);
-                            AppendLog($"📡 mDNS 响应: {remoteEndPoint.Address}");
+                            AppendLog($"📡 mDNS 响应: {((IPEndPoint)remoteEndPoint).Address}");
                         }
                     }
                     catch (SocketException)
