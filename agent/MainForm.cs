@@ -341,7 +341,7 @@ public partial class MainForm : Form
         }
         catch (Exception ex)
         {
-            return $"执行失败: {ex.Message}");
+            return $"执行失败: {ex.Message}";
         }
     }
 
