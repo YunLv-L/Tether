@@ -279,24 +279,26 @@ class TetherViewModel : ViewModel() {
         return found
     }
 
-    // ==================== TCP 深度扫描（逐 IP 更新进度 + 调试日志） ====================
+    // ==================== TCP 深度扫描（平滑进度更新） ====================
     private suspend fun performTcpDiscovery(foundDevices: MutableMap<String, DeviceInfo>) {
         val baseIp = getLocalIpBase()
         val total = 254
         var scannedCount = 0
 
         Log.d("Tether", "========== TCP 扫描开始 ==========")
-        Log.d("Tether", "扫描网段: $baseIp.*")
-        Log.d("Tether", "当前扫描状态: ${_isScanning.value}")
+        Log.d("Tether", "网段: $baseIp.*")
 
+        // 重置进度
         withContext(Dispatchers.Main) {
             _scanProgress.value = "0/254"
-            _statusMessage.value = "开始 TCP 扫描 $baseIp.*"
         }
+
+        var lastUpdateTime = System.currentTimeMillis()
+        val minUpdateInterval = 100L
 
         for (i in 1..total) {
             if (!_isScanning.value) {
-                Log.d("Tether", "⚠️ 扫描被中断，当前进度: $scannedCount/254")
+                Log.d("Tether", "扫描被中断")
                 break
             }
 
@@ -335,18 +337,27 @@ class TetherViewModel : ViewModel() {
                         }
                     }
                 }
-            } catch (e: Exception) {
-                // 跳过
-            }
+            } catch (e: Exception) { /* 跳过 */ }
 
             scannedCount++
-            withContext(Dispatchers.Main) {
-                _scanProgress.value = "${scannedCount}/254"
-            }
 
-            if (scannedCount % 10 == 0) {
-                Log.d("Tether", "扫描进度: $scannedCount/254")
+            // 控制 UI 更新频率（每 5 个 IP 或至少 100ms 更新一次）
+            val now = System.currentTimeMillis()
+            if (scannedCount % 5 == 0 || scannedCount == total || now - lastUpdateTime >= minUpdateInterval) {
+                lastUpdateTime = now
+                withContext(Dispatchers.Main) {
+                    _scanProgress.value = "${scannedCount}/254"
+                }
+                // 给 UI 一点时间刷新
+                if (scannedCount % 10 == 0) {
+                    delay(30)
+                }
             }
+        }
+
+        // 确保最终进度正确
+        withContext(Dispatchers.Main) {
+            _scanProgress.value = "254/254"
         }
 
         Log.d("Tether", "========== TCP 扫描完成 ==========")
