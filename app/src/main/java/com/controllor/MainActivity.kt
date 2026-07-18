@@ -50,31 +50,48 @@ fun TetherApp(
 
     var headerClickCount by remember { mutableStateOf(0) }
     var headerClickStartTime by remember { mutableStateOf(0L) }
+    var lastHeaderClickTime by remember { mutableStateOf(0L) }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "Tether",
-                        modifier = Modifier.combinedClickable(
-                            onLongClick = {
-                                viewModel.toggleDebugMode()
-                            },
-                            onClick = {
-                                val now = System.currentTimeMillis()
-                                if (now - headerClickStartTime > 3000) {
-                                    headerClickCount = 0
-                                }
-                                headerClickStartTime = now
-                                headerClickCount++
-                                if (headerClickCount >= 5) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = if (isDebugMode) "Tether 🔧" else "Tether",
+                            modifier = Modifier.combinedClickable(
+                                onLongClick = {
                                     viewModel.toggleDebugMode()
-                                    headerClickCount = 0
+                                },
+                                onClick = {
+                                    val now = System.currentTimeMillis()
+                                    if (now - headerClickStartTime > 3000) {
+                                        headerClickCount = 0
+                                    }
+                                    headerClickStartTime = now
+                                    headerClickCount++
+                                    if (headerClickCount >= 5) {
+                                        viewModel.toggleDebugMode()
+                                        headerClickCount = 0
+                                    }
                                 }
-                            }
+                            )
                         )
-                    )
+                        if (isDebugMode) {
+                            AssistChip(
+                                onClick = { viewModel.toggleDebugMode() },
+                                label = { Text("Debug", fontSize = MaterialTheme.typography.labelSmall.fontSize) },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    labelColor = MaterialTheme.colorScheme.onErrorContainer
+                                ),
+                                modifier = Modifier.height(24.dp)
+                            )
+                        }
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = { viewModel.tcpScanNetwork() }) {
@@ -117,7 +134,8 @@ fun TetherApp(
             // 状态提示 + 进度
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 if (statusMessage.isNotEmpty()) {
                     AssistChip(
@@ -133,8 +151,9 @@ fun TetherApp(
                 if (isScanning) {
                     Text(
                         text = scanProgress,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(start = 8.dp)
                     )
                 }

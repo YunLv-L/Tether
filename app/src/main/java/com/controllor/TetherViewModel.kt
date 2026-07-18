@@ -114,6 +114,11 @@ class TetherViewModel : ViewModel() {
         } else {
             ""
         }
+        _statusMessage.value = if (_isDebugMode.value) {
+            "🔧 Debug 模式已开启"
+        } else {
+            "Debug 模式已关闭"
+        }
     }
 
     private fun buildDebugInfo(): String {
@@ -221,7 +226,7 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    // ==================== TCP 并行扫描 ====================
+    // ==================== TCP 并行扫描（进度一个一个加） ====================
     fun tcpScanNetwork() {
         if (_isScanning.value) {
             stopScan()
@@ -237,18 +242,18 @@ class TetherViewModel : ViewModel() {
                 val baseIp = getLocalIpBase()
                 val foundDevices = mutableListOf<DeviceInfo>()
                 val total = 254
-                val batchSize = 20
                 var scannedCount = 0
 
                 Log.d("Tether", "开始并行 TCP 扫描网段: $baseIp.*")
 
-                for (batchStart in 1..total step batchSize) {
+                // 每批并发 20 个
+                for (batchStart in 1..total step 20) {
                     if (!_isScanning.value) {
                         Log.d("Tether", "扫描被用户暂停")
                         break
                     }
 
-                    val batchEnd = minOf(batchStart + batchSize - 1, total)
+                    val batchEnd = minOf(batchStart + 19, total)
                     val batchJobs = mutableListOf<Job>()
 
                     for (i in batchStart..batchEnd) {
@@ -288,19 +293,18 @@ class TetherViewModel : ViewModel() {
                             } catch (e: Exception) {
                                 // 连接失败，跳过
                             }
+
+                            // 每扫描一个 IP 就更新进度
+                            withContext(Dispatchers.Main) {
+                                scannedCount++
+                                _scanProgress.value = "${scannedCount}/254"
+                            }
                         }
                         batchJobs.add(job)
                     }
 
+                    // 等待当前批次完成
                     batchJobs.forEach { it.join() }
-
-                    scannedCount += (batchEnd - batchStart + 1)
-                    if (_isScanning.value) {
-                        withContext(Dispatchers.Main) {
-                            _scanProgress.value = "${scannedCount}/254"
-                            _statusMessage.value = "扫描中... ${scannedCount}/254"
-                        }
-                    }
                 }
 
                 withContext(Dispatchers.Main) {
