@@ -449,6 +449,21 @@ fun TetherApp(
             }
         }
     }
+    
+    // ===== 清除设备数据按钮（Debug 模式下显示） =====
+    if (isDebugMode) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { viewModel.clearAllDevices() },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError
+            )
+        ) {
+            Text("🗑️ 清除所有设备数据")
+        }
+    }
 
     // ===== 长按菜单对话框 =====
     if (showDeleteDialog != null) {
