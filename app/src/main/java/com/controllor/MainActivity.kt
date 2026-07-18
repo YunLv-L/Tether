@@ -48,7 +48,6 @@ fun TetherApp(
     var showEditDialog by remember { mutableStateOf<DeviceInfo?>(null) }
     var showNoteDialog by remember { mutableStateOf<DeviceInfo?>(null) }
 
-    // 长按标题触发 Debug 模式
     var headerClickCount by remember { mutableStateOf(0) }
     var headerClickStartTime by remember { mutableStateOf(0L) }
 
@@ -59,8 +58,10 @@ fun TetherApp(
                     Text(
                         text = "Tether",
                         modifier = Modifier.combinedClickable(
+                            onLongClick = {
+                                viewModel.toggleDebugMode()
+                            },
                             onClick = {
-                                // 5 次点击进入 Debug
                                 val now = System.currentTimeMillis()
                                 if (now - headerClickStartTime > 3000) {
                                     headerClickCount = 0
@@ -71,10 +72,6 @@ fun TetherApp(
                                     viewModel.toggleDebugMode()
                                     headerClickCount = 0
                                 }
-                            },
-                            onLongClick = {
-                                // 长按 5 秒进入 Debug
-                                viewModel.toggleDebugMode()
                             }
                         )
                     )
@@ -198,13 +195,14 @@ fun TetherApp(
                     items(devices) { device ->
                         val isSelected = device == selectedDevice
                         Card(
-                            onClick = { viewModel.selectDevice(device) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .combinedClickable(
                                     onLongClick = {
-                                        // 长按弹出操作菜单
                                         showDeleteDialog = device
+                                    },
+                                    onClick = {
+                                        viewModel.selectDevice(device)
                                     }
                                 ),
                             colors = CardDefaults.cardColors(

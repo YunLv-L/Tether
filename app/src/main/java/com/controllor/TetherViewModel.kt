@@ -1,8 +1,6 @@
 package com.tether.controller
 
 import android.content.Context
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -21,16 +19,13 @@ import java.net.Socket
 import java.net.SocketTimeoutException
 import java.security.MessageDigest
 import java.security.SecureRandom
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.SecretKeySpec
 
 data class DeviceInfo(
     val ip: String,
     val name: String = "未知设备",
-    val machineCode: String = "",  // 机器码
+    val machineCode: String = "",
     val isManual: Boolean = false,
-    val note: String = ""          // 用户备注
+    val note: String = ""
 ) {
     fun getDisplayName(): String = if (note.isNotEmpty()) note else name
     override fun toString(): String = if (note.isNotEmpty()) "$ip:$note" else "$ip:$name"
@@ -66,11 +61,10 @@ class TetherViewModel : ViewModel() {
     private var scanJob: Job? = null
     private var machineCodeCache: String? = null
 
-    // ==================== 机器码生成（极难撞库） ====================
+    // ==================== 机器码生成 ====================
     fun generateMachineCode(context: Context): String {
         machineCodeCache?.let { return it }
 
-        // 方案：SHA-256(设备硬件信息 + 随机盐 + 时间种子)
         return try {
             val hardwareInfo = buildString {
                 append(android.os.Build.SERIAL)
@@ -79,7 +73,6 @@ class TetherViewModel : ViewModel() {
                 append(android.os.Build.BOARD)
                 append(android.os.Build.DEVICE)
                 append(android.os.Build.FINGERPRINT)
-                // 添加网络接口 MAC（如果可用）
                 try {
                     val interfaces = NetworkInterface.getNetworkInterfaces()
                     while (interfaces.hasMoreElements()) {
@@ -92,7 +85,6 @@ class TetherViewModel : ViewModel() {
                 } catch (e: Exception) { /* 忽略 */ }
             }
 
-            // 加盐（固定盐 + 随机盐）
             val fixedSalt = "Tether_Salt_2026_@#$%^&*()"
             val randomBytes = ByteArray(32)
             SecureRandom().nextBytes(randomBytes)
@@ -102,21 +94,19 @@ class TetherViewModel : ViewModel() {
             val digest = MessageDigest.getInstance("SHA-256").digest(combined.toByteArray())
             val hash = digest.joinToString("") { "%02x".format(it) }
 
-            // 取前 64 位作为机器码（可读性）
             val result = hash.take(64)
             machineCodeCache = result
             Log.d("Tether", "机器码生成: $result")
             result
         } catch (e: Exception) {
             Log.e("Tether", "机器码生成失败", e)
-            // Fallback: 使用时间戳 + 随机数
             val fallback = "${System.currentTimeMillis()}_${SecureRandom().nextInt(Int.MAX_VALUE)}"
             machineCodeCache = fallback
             fallback
         }
     }
 
-    // ==================== Debug 模式切换 ====================
+    // ==================== Debug 模式 ====================
     fun toggleDebugMode() {
         _isDebugMode.value = !_isDebugMode.value
         _debugInfo.value = if (_isDebugMode.value) {
@@ -302,7 +292,7 @@ class TetherViewModel : ViewModel() {
                         batchJobs.add(job)
                     }
 
-                    batchJobs.joinAll()
+                    batchJobs.forEach { it.join() }
 
                     scannedCount += (batchEnd - batchStart + 1)
                     if (_isScanning.value) {
@@ -351,7 +341,6 @@ class TetherViewModel : ViewModel() {
             _statusMessage.value = "IP 未改变"
             return
         }
-        // 检查新 IP 是否已存在
         if (_devices.value.any { it.ip == newIp }) {
             _statusMessage.value = "IP $newIp 已存在"
             return
