@@ -51,10 +51,6 @@ public partial class MainForm : Form
     private int _currentQuality = 85;
     private int _qualityLevel = 1;
 
-    // 静止检测
-    private long _lastHash = 0;
-    private readonly object _hashLock = new object();
-
     public MainForm()
     {
         _machineCode = GenerateMachineCode();
@@ -138,7 +134,6 @@ public partial class MainForm : Form
         {
             var info = new StringBuilder();
 
-            // CPU 信息
             try
             {
                 string cpu = Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString", "")?.ToString() ?? "";
@@ -148,7 +143,6 @@ public partial class MainForm : Form
             }
             catch { }
 
-            // 主板信息
             try
             {
                 string boardManu = Registry.GetValue(@"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\BIOS", "BaseBoardManufacturer", "")?.ToString() ?? "";
@@ -160,7 +154,6 @@ public partial class MainForm : Form
             }
             catch { }
 
-            // MAC 地址
             try
             {
                 var interfaces = NetworkInterface.GetAllNetworkInterfaces();
@@ -176,7 +169,6 @@ public partial class MainForm : Form
             }
             catch { }
 
-            // 系统 UUID
             try
             {
                 string guid = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography", "MachineGuid", "")?.ToString() ?? "";
@@ -197,12 +189,11 @@ public partial class MainForm : Form
         }
     }
 
-    // ==================== mDNS 响应服务（SO_REUSEADDR 支持多进程共享端口） ====================
+    // ==================== mDNS 响应 ====================
     private void MdnsResponseLoop()
     {
         try
         {
-            // 用 Socket 代替 UdpClient，手动设置 SO_REUSEADDR
             using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
             {
                 socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
@@ -281,11 +272,13 @@ public partial class MainForm : Form
         try
         {
             _tcpListener = new TcpListener(IPAddress.Any, TCP_PORT);
+            _tcpListener.Server.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.NoDelay, true);
             _tcpListener.Start();
 
             while (_isRunning)
             {
                 var client = _tcpListener.AcceptTcpClient();
+                client.NoDelay = true;
                 ThreadPool.QueueUserWorkItem(HandleClient, client);
             }
         }
@@ -304,6 +297,7 @@ public partial class MainForm : Form
             using (client)
             using (var stream = client.GetStream())
             {
+                client.NoDelay = true;
                 byte[] buffer = new byte[1024];
                 int bytesRead = stream.Read(buffer, 0, buffer.Length);
 
@@ -345,17 +339,19 @@ public partial class MainForm : Form
         }
     }
 
-    // ==================== 画质控制服务 ====================
+    // ==================== 画质控制 ====================
     private void HandleQualityControl()
     {
         try
         {
             _qualityListener = new TcpListener(IPAddress.Any, QUALITY_PORT);
+            _qualityListener.Server.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.NoDelay, true);
             _qualityListener.Start();
 
             while (_isRunning)
             {
                 var client = _qualityListener.AcceptTcpClient();
+                client.NoDelay = true;
                 ThreadPool.QueueUserWorkItem(HandleQualityClient, client);
             }
         }
@@ -374,6 +370,7 @@ public partial class MainForm : Form
             using (client)
             using (var stream = client.GetStream())
             {
+                client.NoDelay = true;
                 byte[] buffer = new byte[1024];
                 int bytesRead = stream.Read(buffer, 0, buffer.Length);
                 if (bytesRead > 0)
@@ -413,11 +410,15 @@ public partial class MainForm : Form
         try
         {
             _screenListener = new TcpListener(IPAddress.Any, SCREEN_PORT);
+            _screenListener.Server.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.NoDelay, true);
             _screenListener.Start();
 
             while (_isRunning)
             {
                 var client = _screenListener.AcceptTcpClient();
+                client.NoDelay = true;
+                client.ReceiveBufferSize = 8192;
+                client.SendBufferSize = 8192;
                 ThreadPool.QueueUserWorkItem(HandleScreenClient, client);
             }
         }
@@ -436,6 +437,10 @@ public partial class MainForm : Form
             using (client)
             using (var stream = client.GetStream())
             {
+                // ===== 低延迟配置 =====
+                client.NoDelay = true;
+                client.ReceiveBufferSize = 8192;
+                client.SendBufferSize = 8192;
                 client.ReceiveTimeout = 5000;
                 client.SendTimeout = 5000;
 
@@ -502,24 +507,6 @@ public partial class MainForm : Form
         }
     }
 
-    private long ComputeFastHash(Bitmap bitmap)
-    {
-        long hash = 0;
-        int step = Math.Max(bitmap.Width / 40, 1);
-        int stepY = Math.Max(bitmap.Height / 30, 1);
-
-        for (int y = 0; y < bitmap.Height; y += stepY)
-        {
-            for (int x = 0; x < bitmap.Width; x += step)
-            {
-                var pixel = bitmap.GetPixel(x, y);
-                hash ^= (pixel.R << 16) ^ (pixel.G << 8) ^ pixel.B;
-                hash = (hash << 1) | ((hash >> 63) & 1);
-            }
-        }
-        return hash;
-    }
-
     private Bitmap ScaleImage(Image original, int targetWidth, int targetHeight)
     {
         var result = new Bitmap(targetWidth, targetHeight);
@@ -533,10 +520,36 @@ public partial class MainForm : Form
         return result;
     }
 
+    private byte[] EncodeJpeg(Bitmap bitmap)
+    {
+        using (var ms = new MemoryStream())
+        {
+            var codec = ImageCodecInfo.GetImageEncoders()
+                .FirstOrDefault(c => c.FormatID == ImageFormat.Jpeg.Guid);
+
+            if (codec == null)
+            {
+                bitmap.Save(ms, ImageFormat.Png);
+                return ms.ToArray();
+            }
+
+            var encoderParams = new EncoderParameters(1);
+            encoderParams.Param[0] = new EncoderParameter(
+                System.Drawing.Imaging.Encoder.Quality,
+                (long)_currentQuality
+            );
+            bitmap.Save(ms, codec, encoderParams);
+            return ms.ToArray();
+        }
+    }
+
     private byte[]? CaptureScreen(int targetWidth, int targetHeight)
     {
         try
         {
+            var screen = Screen.PrimaryScreen;
+            if (screen == null) return null;
+
             int physicalWidth, physicalHeight;
             using (var graphics = Graphics.FromHwnd(IntPtr.Zero))
             {
@@ -552,85 +565,27 @@ public partial class MainForm : Form
                 physicalHeight = SystemInformation.PrimaryMonitorSize.Height;
             }
 
-            using (var bitmap = new Bitmap(physicalWidth, physicalHeight))
-            using (var graphics = Graphics.FromImage(bitmap))
+            // 使用逻辑分辨率截屏，然后缩放到目标尺寸
+            int logicalWidth = screen.Bounds.Width;
+            int logicalHeight = screen.Bounds.Height;
+
+            using (var bitmap = new Bitmap(logicalWidth, logicalHeight))
+            using (var g = Graphics.FromImage(bitmap))
             {
-                graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighSpeed;
-                graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Low;
-                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighSpeed;
+                g.CopyFromScreen(screen.Bounds.X, screen.Bounds.Y, 0, 0, screen.Bounds.Size);
 
-                bool success = false;
-                int retryWidth = physicalWidth;
-                int retryHeight = physicalHeight;
-                for (int retry = 0; retry < 3; retry++)
+                // 缩放到目标尺寸
+                if (targetWidth != logicalWidth || targetHeight != logicalHeight)
                 {
-                    try
+                    using (var scaled = new Bitmap(targetWidth, targetHeight))
+                    using (var sg = Graphics.FromImage(scaled))
                     {
-                        graphics.CopyFromScreen(0, 0, 0, 0, new Size(retryWidth, retryHeight));
-                        success = true;
-                        break;
-                    }
-                    catch (ArgumentException)
-                    {
-                        if (retry == 0)
-                        {
-                            var bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1080);
-                            retryWidth = bounds.Width;
-                            retryHeight = bounds.Height;
-                            continue;
-                        }
-                        if (retry == 1)
-                        {
-                            retryWidth = SystemInformation.PrimaryMonitorSize.Width;
-                            retryHeight = SystemInformation.PrimaryMonitorSize.Height;
-                            continue;
-                        }
-                        throw;
+                        sg.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        sg.DrawImage(bitmap, 0, 0, targetWidth, targetHeight);
+                        return EncodeJpeg(scaled);
                     }
                 }
-
-                if (!success) return null;
-
-                long currentHash = ComputeFastHash(bitmap);
-                lock (_hashLock)
-                {
-                    if (_lastHash != 0 && currentHash == _lastHash)
-                    {
-                        return null;
-                    }
-                    _lastHash = currentHash;
-                }
-
-                Bitmap finalBitmap = bitmap;
-                bool needDispose = false;
-                if (targetWidth > 0 && targetHeight > 0 &&
-                    (targetWidth != physicalWidth || targetHeight != physicalHeight))
-                {
-                    finalBitmap = ScaleImage(bitmap, targetWidth, targetHeight);
-                    needDispose = true;
-                }
-
-                using (var ms = new MemoryStream())
-                {
-                    var codec = ImageCodecInfo.GetImageEncoders()
-                        .FirstOrDefault(c => c.FormatID == ImageFormat.Jpeg.Guid);
-
-                    if (codec == null)
-                    {
-                        finalBitmap.Save(ms, ImageFormat.Png);
-                        if (needDispose) finalBitmap.Dispose();
-                        return ms.ToArray();
-                    }
-
-                    var encoderParams = new EncoderParameters(1);
-                    encoderParams.Param[0] = new EncoderParameter(
-                        System.Drawing.Imaging.Encoder.Quality,
-                        (long)_currentQuality
-                    );
-                    finalBitmap.Save(ms, codec, encoderParams);
-                    if (needDispose) finalBitmap.Dispose();
-                    return ms.ToArray();
-                }
+                return EncodeJpeg(bitmap);
             }
         }
         catch (Exception)
