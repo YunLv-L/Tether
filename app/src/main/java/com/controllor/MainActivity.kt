@@ -14,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tether.controller.ui.theme.TetherTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
