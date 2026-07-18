@@ -15,12 +15,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
-import java.net.DatagramPacket
-import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.Socket
-import java.net.SocketTimeoutException
 
 data class DeviceInfo(
     val id: String,
@@ -60,7 +57,6 @@ class TetherViewModel : ViewModel() {
     private val _quality = MutableStateFlow(1)
     val quality: StateFlow<Int> = _quality
 
-    private val udpPort = 5555
     private val tcpPort = 5556
     private val qualityPort = 5558
     private val tcpTimeout = 2000
@@ -123,6 +119,32 @@ class TetherViewModel : ViewModel() {
         _statusMessage.value = "已清除所有设备数据"
     }
 
+    fun toggleDebugMode() {
+        _isDebugMode.value = !_isDebugMode.value
+        _debugInfo.value = if (_isDebugMode.value) buildDebugInfo() else ""
+        _statusMessage.value = if (_isDebugMode.value) "🔧 Debug 模式已开启" else "Debug 模式已关闭"
+    }
+
+    private fun buildDebugInfo(): String {
+        val info = StringBuilder()
+        info.appendLine("📡 调试信息")
+        info.appendLine("━━━━━━━━━━━━━━━━━")
+        info.appendLine("扫描状态: ${if (_isScanning.value) "运行中" else "空闲"}")
+        info.appendLine("扫描进度: ${_scanProgress.value}")
+        val onlineCount = _devices.value.count { it.isOnline }
+        info.appendLine("设备数量: ${_devices.value.size} (在线: $onlineCount)")
+        info.appendLine("选中设备: ${_selectedDevice.value?.ip ?: "无"}")
+        info.appendLine("网段: ${getLocalIpBase()}.x")
+        info.appendLine("TCP 端口: $tcpPort")
+        info.appendLine("画质: ${when(_quality.value) { 0 -> "流畅"; 1 -> "标准"; else -> "高清" }}")
+        info.appendLine("━━━━━━━━━━━━━━━━━")
+        _devices.value.forEachIndexed { index, device ->
+            val status = if (device.isOnline) "🟢" else "🔴"
+            info.appendLine("[$index] $status ${device.ip} | ${device.name} | MC: ${device.machineCode.take(8)}...")
+        }
+        return info.toString()
+    }
+
     fun setQuality(level: Int) {
         _quality.value = level
         prefs.edit().putInt("quality", level).apply()
@@ -150,7 +172,6 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    // ==================== 混合发现：mDNS + TCP 并行 ====================
     fun startHybridDiscovery() {
         if (_isScanning.value) {
             stopScan()
@@ -198,7 +219,6 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    // ==================== mDNS 发现 ====================
     private suspend fun performMdnsDiscovery(foundDevices: MutableMap<String, DeviceInfo>): Boolean {
         val manager = nsdManager ?: return false
         var found = false
@@ -279,7 +299,6 @@ class TetherViewModel : ViewModel() {
         return found
     }
 
-    // ==================== TCP 深度扫描 ====================
     private suspend fun performTcpDiscovery(foundDevices: MutableMap<String, DeviceInfo>) {
         val baseIp = getLocalIpBase()
         val total = 254
@@ -347,10 +366,10 @@ class TetherViewModel : ViewModel() {
                         }
                     } catch (e: Exception) {
                         errorCount++
-                        Log.d("Tether", "连接 $ip 失败: ${e.message}")
                         if (ip == "192.168.10.10") {
-                            Log.d("Tether", "=== 详细异常 ===")
+                            Log.d("Tether", "❌ 连接 $ip 失败: ${e.message}")
                             e.printStackTrace()
+                        }
                     }
                 }
                 jobs.add(job)
@@ -380,20 +399,19 @@ class TetherViewModel : ViewModel() {
         _isScanning.value = false
         scanJob?.cancel()
         scanJob = null
-        
+
         try {
-            mdnsListener?.let { 
+            mdnsListener?.let {
                 nsdManager?.stopServiceDiscovery(it)
                 mdnsListener = null
             }
         } catch (e: Exception) {
             Log.e("Tether", "清理mDNS失败", e)
         }
-        
+
         _statusMessage.value = "扫描已停止"
     }
 
-    // ==================== 设备管理 ====================
     fun deleteDevice(device: DeviceInfo) {
         val newList = _devices.value.filter { it.id != device.id }
         _devices.value = newList
@@ -482,33 +500,6 @@ class TetherViewModel : ViewModel() {
         Log.d("Tether", "selectDevice: ${device.ip}")
         _selectedDevice.value = device
         _statusMessage.value = "已选择: ${device.ip}"
-    }
-
-    fun toggleDebugMode() {
-        _isDebugMode.value = !_isDebugMode.value
-        _debugInfo.value = if (_isDebugMode.value) buildDebugInfo() else ""
-        _statusMessage.value = if (_isDebugMode.value) "🔧 Debug 模式已开启" else "Debug 模式已关闭"
-    }
-
-    private fun buildDebugInfo(): String {
-        val info = StringBuilder()
-        info.appendLine("📡 调试信息")
-        info.appendLine("━━━━━━━━━━━━━━━━━")
-        info.appendLine("扫描状态: ${if (_isScanning.value) "运行中" else "空闲"}")
-        info.appendLine("扫描进度: ${_scanProgress.value}")
-        val onlineCount = _devices.value.count { it.isOnline }
-        info.appendLine("设备数量: ${_devices.value.size} (在线: $onlineCount)")
-        info.appendLine("选中设备: ${_selectedDevice.value?.ip ?: "无"}")
-        info.appendLine("网段: ${getLocalIpBase()}.x")
-        info.appendLine("TCP 端口: $tcpPort")
-        info.appendLine("UDP 端口: $udpPort")
-        info.appendLine("画质: ${when(_quality.value) { 0 -> "流畅"; 1 -> "标准"; else -> "高清" }}")
-        info.appendLine("━━━━━━━━━━━━━━━━━")
-        _devices.value.forEachIndexed { index, device ->
-            val status = if (device.isOnline) "🟢" else "🔴"
-            info.appendLine("[$index] $status ${device.ip} | ${device.name} | MC: ${device.machineCode.take(8)}...")
-        }
-        return info.toString()
     }
 
     fun sendCommand(command: String) {
