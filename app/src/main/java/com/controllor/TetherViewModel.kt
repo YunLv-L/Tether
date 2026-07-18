@@ -279,7 +279,7 @@ class TetherViewModel : ViewModel() {
         return found
     }
 
-    // ==================== TCP 深度扫描（并行 + 逐个 IP 调试） ====================
+    // ==================== TCP 深度扫描 ====================
     private suspend fun performTcpDiscovery(foundDevices: MutableMap<String, DeviceInfo>) {
         val baseIp = getLocalIpBase()
         val total = 254
@@ -296,8 +296,7 @@ class TetherViewModel : ViewModel() {
             _statusMessage.value = "开始 TCP 扫描 $baseIp.*"
         }
 
-        // 每批 3 个 IP 并行扫描，降低并发压力
-        val batchSize = 3
+        val batchSize = 5
         for (batchStart in 1..total step batchSize) {
             if (!_isScanning.value) {
                 Log.d("Tether", "⚠️ 扫描被中断")
@@ -348,13 +347,7 @@ class TetherViewModel : ViewModel() {
                         }
                     } catch (e: Exception) {
                         errorCount++
-                        if (ip == "192.168.10.10") {
-                            Log.d("Tether", "❌ 连接 $ip 失败: ${e.message}")
-                            e.printStackTrace()
-                        }
-                        if (errorCount <= 10 || errorCount % 50 == 0) {
-                            Log.d("Tether", "连接 $ip 失败: ${e.message}")
-                        }
+                        Log.d("Tether", "连接 $ip 失败: ${e.message}")
                     }
                 }
                 jobs.add(job)
@@ -368,8 +361,7 @@ class TetherViewModel : ViewModel() {
             if (scannedCount % 20 == 0) {
                 Log.d("Tether", "扫描进度: $scannedCount/254, 已发现: $foundCount, 错误: $errorCount")
             }
-            // 每批之间加延迟
-            delay(50)
+            delay(30)
         }
 
         withContext(Dispatchers.Main) {

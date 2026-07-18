@@ -354,79 +354,83 @@ fun TetherApp(
 
             // ===== 画质切换 + 查看画面 =====
             if (selectedDevice != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // 画质切换
+                var expanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = it },
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    var expanded by remember { mutableStateOf(false) }
-                    ExposedDropdownMenuBox(
-                        expanded = expanded,
-                        onExpandedChange = { expanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = when (quality) {
-                                0 -> "流畅 (720p)"
-                                1 -> "标准 (1080p)"
-                                else -> "高清 (原始)"
-                            },
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("画质") },
-                            modifier = Modifier
-                                .menuAnchor()
-                                .weight(1f),
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                            )
-                        )
-                        ExposedDropdownMenu(
-                            expanded = expanded,
-                            onDismissRequest = { expanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("流畅 (720p)") },
-                                onClick = {
-                                    viewModel.setQuality(0)
-                                    expanded = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("标准 (1080p)") },
-                                onClick = {
-                                    viewModel.setQuality(1)
-                                    expanded = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("高清 (原始)") },
-                                onClick = {
-                                    viewModel.setQuality(2)
-                                    expanded = false
-                                }
-                            )
-                        }
-                    }
-
-                    Button(
-                        onClick = {
-                            val ip = selectedDevice?.ip ?: return@Button
-                            val intent = Intent(context, ScreenActivity::class.java)
-                            intent.putExtra("ip", ip)
-                            intent.putExtra("quality", quality)
-                            context.startActivity(intent)
+                    OutlinedTextField(
+                        value = when (quality) {
+                            0 -> "流畅 (720p)"
+                            1 -> "标准 (1080p)"
+                            else -> "高清 (原始)"
                         },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.secondary,
-                            contentColor = MaterialTheme.colorScheme.onSecondary
-                        ),
-                        enabled = selectedDevice?.isOnline == true
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("画质") },
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth(),
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        )
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
                     ) {
-                        Text("🖥️ 查看画面")
+                        DropdownMenuItem(
+                            text = { Text("流畅 (720p)") },
+                            onClick = {
+                                viewModel.setQuality(0)
+                                expanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("标准 (1080p)") },
+                            onClick = {
+                                viewModel.setQuality(1)
+                                expanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("高清 (原始)") },
+                            onClick = {
+                                viewModel.setQuality(2)
+                                expanded = false
+                            }
+                        )
                     }
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // 查看画面按钮
+               Button(
+                    onClick = {
+                        val ip = selectedDevice?.ip ?: return@Button
+                        android.util.Log.d("Tether", "查看画面, IP: $ip")
+                        val intent = Intent(context, ScreenActivity::class.java)
+                        intent.putExtra("ip", ip)
+                        intent.putExtra("quality", quality)
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary
+                    )
+                ) {
+                    Text("🖥️ 查看画面", fontSize = MaterialTheme.typography.titleMedium.fontSize)
                 }
             }
 
@@ -451,19 +455,19 @@ fun TetherApp(
     }
     
     // ===== 清除设备数据按钮（Debug 模式下显示） =====
-    if (isDebugMode) {
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { viewModel.clearAllDevices() },
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.error,
-                contentColor = MaterialTheme.colorScheme.onError
-            )
-        ) {
-            Text("🗑️ 清除所有设备数据")
-        }
-    }
+    //if (isDebugMode) {
+    //    Spacer(modifier = Modifier.height(8.dp))
+    //    Button(
+    //        onClick = { viewModel.clearAllDevices() },
+    //        modifier = Modifier.fillMaxWidth(),
+    //        colors = ButtonDefaults.buttonColors(
+    //            containerColor = MaterialTheme.colorScheme.error,
+    //            contentColor = MaterialTheme.colorScheme.onError
+    //        )
+    //    ) {
+    //        Text("🗑️ 清除所有设备数据")
+    //    }
+    //}
 
     // ===== 长按菜单对话框 =====
     if (showDeleteDialog != null) {
