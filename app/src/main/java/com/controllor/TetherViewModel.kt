@@ -191,7 +191,7 @@ class TetherViewModel : ViewModel() {
 
                 val onlineCount = _devices.value.count { it.isOnline }
                 _isScanning.value = false
-                _scanProgress.value = "254/254"
+                _scanProgress.value = "0/254"
                 _statusMessage.value = if (onlineCount > 0) {
                     "发现 ${onlineCount} 台在线设备 (mDNS: ${if (mdnsFound) "✓" else "✗"})"
                 } else {
