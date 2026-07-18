@@ -3,10 +3,11 @@ package com.tether.controller
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.OutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -36,49 +37,59 @@ class TetherViewModel : ViewModel() {
         _statusMessage.value = "正在扫描..."
 
         viewModelScope.launch {
-            var socket: DatagramSocket? = null
-            try {
-                socket = DatagramSocket(udpPort).apply {
-                    broadcast = true
-                    soTimeout = discoveryTimeout.toInt()
-                    reuseAddress = true
-                }
-                val buffer = ByteArray(1024)
-                val packet = DatagramPacket(buffer, buffer.size)
-                val startTime = System.currentTimeMillis()
-                val foundDevices = mutableListOf<String>()
+            withContext(Dispatchers.IO) {
+                var socket: DatagramSocket? = null
+                try {
+                    socket = DatagramSocket(udpPort).apply {
+                        broadcast = true
+                        soTimeout = discoveryTimeout.toInt()
+                        reuseAddress = true
+                    }
+                    val buffer = ByteArray(1024)
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    val startTime = System.currentTimeMillis()
+                    val foundDevices = mutableListOf<String>()
 
-                while (System.currentTimeMillis() - startTime < discoveryTimeout) {
-                    try {
-                        socket.receive(packet)
-                        val message = String(packet.data, 0, packet.length)
-                        val ip = packet.address.hostAddress ?: continue
-                        if (message.isNotBlank() && message.startsWith("TETHER_AGENT|")) {
-                            val parts = message.split("|")
-                            if (parts.size >= 2) {
-                                val deviceName = parts[1]
-                                val display = "$ip:$deviceName"
-                                if (!foundDevices.contains(display)) {
-                                    foundDevices.add(display)
-                                    _devices.value = foundDevices.toList()
+                    while (System.currentTimeMillis() - startTime < discoveryTimeout) {
+                        try {
+                            socket.receive(packet)
+                            val message = String(packet.data, 0, packet.length)
+                            val ip = packet.address.hostAddress ?: continue
+                            if (message.isNotBlank() && message.startsWith("TETHER_AGENT|")) {
+                                val parts = message.split("|")
+                                if (parts.size >= 2) {
+                                    val deviceName = parts[1]
+                                    val display = "$ip:$deviceName"
+                                    if (!foundDevices.contains(display)) {
+                                        foundDevices.add(display)
+                                        withContext(Dispatchers.Main) {
+                                            _devices.value = foundDevices.toList()
+                                        }
+                                    }
                                 }
                             }
+                        } catch (e: java.net.SocketTimeoutException) {
+                            // 超时继续
                         }
-                    } catch (e: java.net.SocketTimeoutException) {
-                        // 超时继续
+                    }
+                    withContext(Dispatchers.Main) {
+                        _statusMessage.value = if (foundDevices.isEmpty()) {
+                            "未发现设备，可手动输入 IP"
+                        } else {
+                            "发现 ${foundDevices.size} 台设备"
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        _statusMessage.value = "扫描异常: ${e.message}"
+                    }
+                    Log.e("Tether", "扫描异常", e)
+                } finally {
+                    socket?.close()
+                    withContext(Dispatchers.Main) {
+                        _isScanning.value = false
                     }
                 }
-                _statusMessage.value = if (foundDevices.isEmpty()) {
-                    "未发现设备，可手动输入 IP"
-                } else {
-                    "发现 ${foundDevices.size} 台设备"
-                }
-            } catch (e: Exception) {
-                _statusMessage.value = "扫描异常: ${e.message}"
-                Log.e("Tether", "扫描异常", e)
-            } finally {
-                socket?.close()
-                _isScanning.value = false
             }
         }
     }
@@ -110,16 +121,22 @@ class TetherViewModel : ViewModel() {
         }
 
         viewModelScope.launch {
-            try {
-                Socket(ip, tcpPort).use { socket ->
-                    val output: OutputStream = socket.getOutputStream()
-                    output.write((command + "\n").toByteArray())
-                    output.flush()
-                    _statusMessage.value = "指令已发送: $command"
+            withContext(Dispatchers.IO) {
+                try {
+                    Socket(ip, tcpPort).use { socket ->
+                        val output: OutputStream = socket.getOutputStream()
+                        output.write((command + "\n").toByteArray())
+                        output.flush()
+                        withContext(Dispatchers.Main) {
+                            _statusMessage.value = "指令已发送: $command"
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        _statusMessage.value = "发送失败: ${e.message}"
+                    }
+                    Log.e("Tether", "发送指令异常", e)
                 }
-            } catch (e: Exception) {
-                _statusMessage.value = "发送失败: ${e.message}"
-                Log.e("Tether", "发送指令异常", e)
             }
         }
     }
