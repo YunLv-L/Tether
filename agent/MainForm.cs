@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Net.NetworkInformation;
 using System.Text;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -162,11 +163,16 @@ public partial class MainForm : Form
             // MAC 地址
             try
             {
-                var mac = NetworkInterface.GetAllNetworkInterfaces()
-                    .FirstOrDefault(n => n.OperationalStatus == OperationalStatus.Up &&
-                                        n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-                    ?.GetPhysicalAddress()?.ToString() ?? "";
-                info.Append(mac);
+                var interfaces = NetworkInterface.GetAllNetworkInterfaces();
+                var upInterface = interfaces.FirstOrDefault(n =>
+                    n.OperationalStatus == OperationalStatus.Up &&
+                    n.NetworkInterfaceType != NetworkInterfaceType.Loopback
+                );
+                if (upInterface != null)
+                {
+                    string mac = upInterface.GetPhysicalAddress()?.ToString() ?? "";
+                    info.Append(mac);
+                }
             }
             catch { }
 
@@ -621,7 +627,7 @@ public partial class MainForm : Form
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return null;
         }
