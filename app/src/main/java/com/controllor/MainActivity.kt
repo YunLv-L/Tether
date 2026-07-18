@@ -1,4 +1,3 @@
-// app/src/main/java/com/tether/controller/MainActivity.kt
 package com.tether.controller
 
 import android.Manifest
@@ -6,9 +5,9 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ListView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -17,7 +16,6 @@ import androidx.core.content.ContextCompat
 import java.io.OutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
-import java.net.InetAddress
 import java.net.Socket
 import java.util.concurrent.Executors
 
@@ -28,8 +26,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSendLock: Button
     private lateinit var btnSendSleep: Button
     private lateinit var btnSendShutdown: Button
+    private lateinit var etManualIP: EditText
+    private lateinit var btnManualConnect: Button
 
-    private val discoveredDevices = mutableListOf<String>() // 存储 "IP:设备名"
+    private val discoveredDevices = mutableListOf<String>()
     private val adapter: ArrayAdapter<String> by lazy {
         ArrayAdapter(this, android.R.layout.simple_list_item_1, discoveredDevices)
     }
@@ -37,7 +37,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedDeviceIp: String? = null
     private val udpPort = 5555
     private val tcpPort = 5556
-    private val discoveryTimeout = 3000L // 3秒
+    private val discoveryTimeout = 3000L
 
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -51,6 +51,8 @@ class MainActivity : AppCompatActivity() {
         btnSendLock = findViewById(R.id.btnSendLock)
         btnSendSleep = findViewById(R.id.btnSendSleep)
         btnSendShutdown = findViewById(R.id.btnSendShutdown)
+        etManualIP = findViewById(R.id.etManualIP)
+        btnManualConnect = findViewById(R.id.btnManualConnect)
 
         listView.adapter = adapter
 
@@ -61,18 +63,44 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "已选择: $item", Toast.LENGTH_SHORT).show()
         }
 
-        btnDiscover.setOnClickListener {
-            if (checkAndRequestPermissions()) {
-                startDiscovery()
+        // 手动连接按钮
+        btnManualConnect.setOnClickListener {
+            val ip = etManualIP.text.toString().trim()
+            if (ip.isNotEmpty()) {
+                selectedDeviceIp = ip
+                val display = "$ip:手动连接"
+                if (!discoveredDevices.contains(display)) {
+                    discoveredDevices.add(display)
+                    adapter.notifyDataSetChanged()
+                }
+                Toast.makeText(this, "已设置 IP: $ip", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "请输入 IP 地址", Toast.LENGTH_SHORT).show()
             }
         }
 
-        // 发送指令按钮（需要先选择设备）
+        // 刷新扫描
+        btnDiscover.setOnClickListener {
+            if (checkAndRequestPermissions()) {
+                startDiscovery()
+                // 同时添加一个固定 IP 作为备选
+                mainHandler.postDelayed({
+                    val fixedIp = "192.168.10.10:YUNLV·DEVICE(直连)"
+                    if (!discoveredDevices.contains(fixedIp)) {
+                        discoveredDevices.add(fixedIp)
+                        adapter.notifyDataSetChanged()
+                        Toast.makeText(this, "已添加固定设备: 192.168.10.10", Toast.LENGTH_SHORT).show()
+                    }
+                }, 2000)
+            }
+        }
+
+        // 发送指令
         btnSendLock.setOnClickListener { sendCommand("lock") }
         btnSendSleep.setOnClickListener { sendCommand("sleep") }
         btnSendShutdown.setOnClickListener { sendCommand("shutdown") }
 
-        // 首次启动自动发现
+        // 首次启动自动扫描
         if (checkAndRequestPermissions()) {
             startDiscovery()
         }
@@ -106,10 +134,6 @@ class MainActivity : AppCompatActivity() {
                     broadcast = true
                     soTimeout = discoveryTimeout.toInt()
                 }
-                // 发送广播请求（可选，这里我们只监听被动广播，但也可以主动发送请求）
-                // 为了简单，我们只监听 PC 主动发出的广播包
-
-                // 等待接收数据包
                 val buffer = ByteArray(1024)
                 val packet = DatagramPacket(buffer, buffer.size)
                 val startTime = System.currentTimeMillis()
@@ -119,7 +143,6 @@ class MainActivity : AppCompatActivity() {
                         socket.receive(packet)
                         val message = String(packet.data, 0, packet.length)
                         val ip = packet.address.hostAddress ?: continue
-                        // 消息格式约定: "TETHER_AGENT|设备名"
                         if (message.startsWith("TETHER_AGENT|")) {
                             val deviceName = message.substringAfter("|")
                             val display = "$ip:$deviceName"

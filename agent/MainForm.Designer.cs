@@ -3,20 +3,22 @@ namespace TetherAgent;
 partial class MainForm
 {
     private System.ComponentModel.IContainer components = null;
+    private TableLayoutPanel mainLayout;
+    private Panel headerPanel;
     private Label lblTitle;
-    private Panel panelHeader;
-    private Panel panelDevice;
+    private FlowLayoutPanel infoPanel;
     private Label lblDeviceLabel;
     private Label lblDeviceName;
     private Label lblIPLabel;
     private Label lblIP;
+    private Button btnCopyIP;
     private Label lblPortLabel;
     private Label lblPort;
-    private Label lblStatus;
     private Label lblStatusLabel;
-    private TextBox txtLog;
+    private Label lblStatus;
+    private Panel logPanel;
     private Label lblLogLabel;
-    private Button btnCopyIP;
+    private TextBox txtLog;
 
     protected override void Dispose(bool disposing)
     {
@@ -27,162 +29,185 @@ partial class MainForm
 
     private void InitializeComponent()
     {
-        this.BackColor = Color.FromArgb(15, 23, 42);  // #0F172A
-        this.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
-        this.ForeColor = Color.White;
-        this.FormBorderStyle = FormBorderStyle.FixedSingle;
-        this.MaximizeBox = false;
-        this.MinimizeBox = true;
-        this.Size = new Size(520, 500);
-        this.StartPosition = FormStartPosition.CenterScreen;
+        this.components = new System.ComponentModel.Container();
+        
+        // ===== 窗体设置 =====
         this.Text = "Tether Agent";
+        this.BackColor = Color.FromArgb(10, 20, 40);
+        this.ForeColor = Color.White;
+        this.MinimumSize = new Size(500, 420);
+        this.Size = new Size(560, 540);
+        this.StartPosition = FormStartPosition.CenterScreen;
+        this.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
 
-        // ===== 顶部标题 =====
-        panelHeader = new Panel
+        // ===== 主布局 =====
+        this.mainLayout = new TableLayoutPanel
         {
-            Dock = DockStyle.Top,
-            Height = 50,
-            BackColor = Color.FromArgb(30, 41, 59)
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Padding = new Padding(12, 12, 12, 12),
+            BackColor = Color.FromArgb(10, 20, 40)
         };
+        this.mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+        this.mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 120F));
+        this.mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        this.mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 0F));
 
-        lblTitle = new Label
+        // ===== 顶部标题栏 =====
+        this.headerPanel = new Panel
         {
-            Text = "🔗 Tether Agent",
-            Font = new Font("Segoe UI", 16, FontStyle.Bold),
-            ForeColor = Color.FromArgb(59, 130, 246),
+            Dock = DockStyle.Fill,
+            BackColor = Color.FromArgb(20, 40, 80),
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        this.lblTitle = new Label
+        {
+            Text = "⚡ Tether Agent",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
+            Font = new Font("Segoe UI", 15F, FontStyle.Bold),
+            ForeColor = Color.FromArgb(100, 180, 255),
             Padding = new Padding(16, 0, 0, 0)
         };
-        panelHeader.Controls.Add(lblTitle);
+        this.headerPanel.Controls.Add(lblTitle);
 
-        // ===== 设备信息卡片 =====
-        panelDevice = new Panel
+        // ===== 信息卡片（流式布局，自动换行） =====
+        this.infoPanel = new FlowLayoutPanel
         {
-            Dock = DockStyle.Top,
-            Height = 150,
-            Padding = new Padding(16),
-            BackColor = Color.FromArgb(30, 41, 59),
-            Margin = new Padding(12)
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            Padding = new Padding(12, 8, 12, 8),
+            BackColor = Color.FromArgb(20, 35, 65),
+            Margin = new Padding(0, 0, 0, 8)
         };
 
-        lblDeviceLabel = new Label
+        // 设备名
+        this.lblDeviceLabel = new Label
         {
-            Text = "设备名称",
-            ForeColor = Color.FromArgb(148, 163, 184),
-            Font = new Font("Segoe UI", 9, FontStyle.Regular),
-            Location = new Point(16, 12),
-            Size = new Size(80, 20)
+            Text = "💻",
+            ForeColor = Color.FromArgb(150, 180, 220),
+            Font = new Font("Segoe UI", 11F, FontStyle.Regular),
+            AutoSize = true,
+            Padding = new Padding(4, 4, 0, 4)
         };
-        lblDeviceName = new Label
+        this.lblDeviceName = new Label
         {
             Text = "---",
             ForeColor = Color.White,
-            Font = new Font("Segoe UI", 11, FontStyle.Bold),
-            Location = new Point(16, 34),
-            Size = new Size(300, 24)
+            Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+            AutoSize = true,
+            Padding = new Padding(0, 4, 16, 4)
         };
 
-        lblIPLabel = new Label
+        // IP
+        this.lblIPLabel = new Label
         {
-            Text = "IP 地址",
-            ForeColor = Color.FromArgb(148, 163, 184),
-            Font = new Font("Segoe UI", 9, FontStyle.Regular),
-            Location = new Point(16, 66),
-            Size = new Size(80, 20)
+            Text = "🌐",
+            ForeColor = Color.FromArgb(150, 180, 220),
+            Font = new Font("Segoe UI", 11F, FontStyle.Regular),
+            AutoSize = true,
+            Padding = new Padding(4, 4, 0, 4)
         };
-        lblIP = new Label
+        this.lblIP = new Label
         {
             Text = "---",
-            ForeColor = Color.FromArgb(59, 130, 246),
-            Font = new Font("Segoe UI", 11, FontStyle.Bold),
-            Location = new Point(16, 88),
-            Size = new Size(200, 24)
+            ForeColor = Color.FromArgb(100, 200, 255),
+            Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+            AutoSize = true,
+            Padding = new Padding(0, 4, 4, 4),
+            Cursor = Cursors.Hand
         };
+        this.lblIP.Click += (s, e) => { Clipboard.SetText(lblIP.Text); };
 
-        btnCopyIP = new Button
+        // 端口
+        this.lblPortLabel = new Label
         {
-            Text = "复制",
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Color.FromArgb(59, 130, 246),
-            ForeColor = Color.White,
-            Font = new Font("Segoe UI", 8, FontStyle.Bold),
-            Location = new Point(230, 88),
-            Size = new Size(60, 24),
-            FlatAppearance = { BorderSize = 0 }
+            Text = "🔌",
+            ForeColor = Color.FromArgb(150, 180, 220),
+            Font = new Font("Segoe UI", 11F, FontStyle.Regular),
+            AutoSize = true,
+            Padding = new Padding(4, 4, 0, 4)
         };
-        btnCopyIP.Click += (s, e) => { Clipboard.SetText(lblIP.Text); };
-
-        lblPortLabel = new Label
-        {
-            Text = "TCP 端口",
-            ForeColor = Color.FromArgb(148, 163, 184),
-            Font = new Font("Segoe UI", 9, FontStyle.Regular),
-            Location = new Point(310, 66),
-            Size = new Size(80, 20)
-        };
-        lblPort = new Label
+        this.lblPort = new Label
         {
             Text = "5556",
             ForeColor = Color.White,
-            Font = new Font("Segoe UI", 11, FontStyle.Bold),
-            Location = new Point(310, 88),
-            Size = new Size(100, 24)
+            Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+            AutoSize = true,
+            Padding = new Padding(0, 4, 16, 4)
         };
 
-        lblStatusLabel = new Label
+        // 状态
+        this.lblStatusLabel = new Label
         {
-            Text = "状态",
-            ForeColor = Color.FromArgb(148, 163, 184),
-            Font = new Font("Segoe UI", 9, FontStyle.Regular),
-            Location = new Point(16, 120),
-            Size = new Size(80, 20)
-        };
-        lblStatus = new Label
-        {
-            Text = "● 运行中",
+            Text = "●",
             ForeColor = Color.FromArgb(74, 222, 128),
-            Font = new Font("Segoe UI", 11, FontStyle.Bold),
-            Location = new Point(16, 140),
-            Size = new Size(150, 24)
+            Font = new Font("Segoe UI", 14F, FontStyle.Regular),
+            AutoSize = true,
+            Padding = new Padding(4, 4, 0, 4)
+        };
+        this.lblStatus = new Label
+        {
+            Text = "运行中",
+            ForeColor = Color.FromArgb(74, 222, 128),
+            Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+            AutoSize = true,
+            Padding = new Padding(0, 4, 0, 4)
         };
 
-        panelDevice.Controls.AddRange(new Control[] {
+        this.infoPanel.Controls.AddRange(new Control[] {
             lblDeviceLabel, lblDeviceName,
-            lblIPLabel, lblIP, btnCopyIP,
+            lblIPLabel, lblIP,
             lblPortLabel, lblPort,
             lblStatusLabel, lblStatus
         });
 
         // ===== 日志区域 =====
-        lblLogLabel = new Label
-        {
-            Text = "📋 运行日志",
-            ForeColor = Color.FromArgb(148, 163, 184),
-            Font = new Font("Segoe UI", 9, FontStyle.Regular),
-            Dock = DockStyle.Top,
-            Padding = new Padding(16, 8, 0, 0),
-            Height = 32
-        };
-
-        txtLog = new TextBox
+        this.logPanel = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = Color.FromArgb(15, 23, 42),
-            ForeColor = Color.FromArgb(203, 213, 225),
-            Font = new Font("Consolas", 9, FontStyle.Regular),
+            BackColor = Color.FromArgb(12, 22, 45)
+        };
+
+        this.lblLogLabel = new Label
+        {
+            Text = "📋 日志",
+            Dock = DockStyle.Top,
+            Height = 28,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+            ForeColor = Color.FromArgb(130, 160, 200),
+            Padding = new Padding(12, 0, 0, 0),
+            BackColor = Color.FromArgb(18, 32, 58)
+        };
+
+        this.txtLog = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Color.FromArgb(8, 16, 32),
+            ForeColor = Color.FromArgb(180, 210, 240),
+            Font = new Font("Consolas", 9F, FontStyle.Regular),
             BorderStyle = BorderStyle.None,
             Multiline = true,
             ReadOnly = true,
             ScrollBars = ScrollBars.Vertical,
             WordWrap = true,
-            Padding = new Padding(16, 8, 16, 8)
+            Padding = new Padding(12, 6, 12, 6),
+            Text = "等待连接...\n"
         };
 
-        // ===== 添加到窗体 =====
-        this.Controls.Add(txtLog);
-        this.Controls.Add(lblLogLabel);
-        this.Controls.Add(panelDevice);
-        this.Controls.Add(panelHeader);
+        this.logPanel.Controls.Add(txtLog);
+        this.logPanel.Controls.Add(lblLogLabel);
+
+        // ===== 组装 =====
+        this.mainLayout.Controls.Add(headerPanel, 0, 0);
+        this.mainLayout.Controls.Add(infoPanel, 0, 1);
+        this.mainLayout.Controls.Add(logPanel, 0, 2);
+        this.Controls.Add(mainLayout);
+
+        // 窗体贴边
+        this.Padding = new Padding(0);
     }
 }
