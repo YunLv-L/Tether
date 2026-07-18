@@ -74,6 +74,8 @@ class TetherViewModel : ViewModel() {
     fun init(context: Context) {
         this.context = context
         prefs = context.getSharedPreferences("tether_devices", Context.MODE_PRIVATE)
+        // 清空旧数据，避免残留
+        prefs.edit().clear().apply()
         loadDevices()
         _quality.value = prefs.getInt("quality", 1)
         nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
@@ -111,7 +113,6 @@ class TetherViewModel : ViewModel() {
             _devices.value = loaded
         } catch (e: Exception) {
             Log.e("Tether", "加载设备失败", e)
-            prefs.edit().clear().apply()
             _devices.value = emptyList()
         }
     }
@@ -137,6 +138,7 @@ class TetherViewModel : ViewModel() {
                 try {
                     Socket(ip, qualityPort).use { socket ->
                         socket.soTimeout = 3000
+                        socket.tcpNoDelay = true
                         val output = socket.getOutputStream()
                         output.write("RES:$level\n".toByteArray())
                         output.flush()
@@ -155,7 +157,9 @@ class TetherViewModel : ViewModel() {
             stopScan()
             return
         }
-        _devices.value = _devices.value.map { it.copy(isOnline = false) }
+        // 清空设备列表，不保留旧数据
+        _devices.value = emptyList()
+        _selectedDevice.value = null
         _isScanning.value = true
         _statusMessage.value = "正在快速发现..."
         _scanProgress.value = "0/254"
@@ -180,33 +184,9 @@ class TetherViewModel : ViewModel() {
             tcpDeferred.await()
 
             withContext(Dispatchers.Main) {
-                val existingDevices = _devices.value.toMutableList()
-                val foundIds = foundDevices.keys
-
-                // 先清除所有设备的在线状态
-                for (i in existingDevices.indices) {
-                    if (!existingDevices[i].isManual) {
-                        existingDevices[i] = existingDevices[i].copy(isOnline = false)
-                    }
-                }
-
-                // 更新或添加发现的设备
-                foundDevices.values.forEach { newDevice ->
-                    val existingIndex = existingDevices.indexOfFirst { it.id == newDevice.id }
-                    if (existingIndex >= 0) {
-                        val oldDevice = existingDevices[existingIndex]
-                        existingDevices[existingIndex] = oldDevice.copy(
-                            ip = newDevice.ip,
-                            isOnline = true,
-                            name = newDevice.name,
-                            machineCode = newDevice.machineCode
-                        )
-                    } else {
-                        existingDevices.add(newDevice.copy(isOnline = true))
-                    }
-                }
-
-                _devices.value = existingDevices
+                // 直接用 foundDevices 生成设备列表
+                val newDevices = foundDevices.values.map { it.copy(isOnline = true) }.toMutableList()
+                _devices.value = newDevices
                 saveDevices()
 
                 val onlineCount = _devices.value.count { it.isOnline }
@@ -242,12 +222,7 @@ class TetherViewModel : ViewModel() {
                         machineCode = machineCode
                     )
                     synchronized(foundDevices) {
-                        val existing = foundDevices[id]
-                        if (existing != null) {
-                            foundDevices[id] = existing.copy(ip = ip, isOnline = true)
-                        } else {
-                            foundDevices[id] = device
-                        }
+                        foundDevices[id] = device
                     }
                     found = true
                     _statusMessage.value = "发现设备: $ip:$name (mDNS)"
@@ -321,6 +296,7 @@ class TetherViewModel : ViewModel() {
             try {
                 Socket(ip, tcpPort).use { socket ->
                     socket.soTimeout = tcpTimeout
+                    socket.tcpNoDelay = true
                     val output: OutputStream = socket.getOutputStream()
                     output.write("ping\n".toByteArray())
                     output.flush()
@@ -344,12 +320,7 @@ class TetherViewModel : ViewModel() {
                                 machineCode = machineCode
                             )
                             synchronized(foundDevices) {
-                                val existing = foundDevices[id]
-                                if (existing != null) {
-                                    foundDevices[id] = existing.copy(ip = ip, isOnline = true)
-                                } else {
-                                    foundDevices[id] = device
-                                }
+                                foundDevices[id] = device
                             }
                             withContext(Dispatchers.Main) {
                                 _statusMessage.value = "发现设备: $ip:$deviceName (TCP)"
