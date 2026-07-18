@@ -28,7 +28,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             TetherTheme {
                 val viewModel: TetherViewModel = viewModel()
-                // 持久化存储由 ViewModel 内部管理
+                LaunchedEffect(Unit) {
+                    viewModel.init(applicationContext)
+                }
                 TetherApp(viewModel = viewModel)
             }
         }
@@ -47,6 +49,7 @@ fun TetherApp(
     val scanProgress by viewModel.scanProgress.collectAsState()
     val isDebugMode by viewModel.isDebugMode.collectAsState()
     val debugInfo by viewModel.debugInfo.collectAsState()
+    val quality by viewModel.quality.collectAsState()
 
     val context = LocalContext.current
 
@@ -57,7 +60,6 @@ fun TetherApp(
     var headerClickCount by remember { mutableStateOf(0) }
     var headerClickStartTime by remember { mutableStateOf(0L) }
 
-    // 调试日志
     LaunchedEffect(selectedDevice) {
         android.util.Log.d("Tether", "selectedDevice 变化: $selectedDevice")
     }
@@ -104,7 +106,7 @@ fun TetherApp(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { viewModel.tcpScanNetwork() }) {
+                    IconButton(onClick = { viewModel.startHybridDiscovery() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
                     }
                 },
@@ -116,7 +118,7 @@ fun TetherApp(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { viewModel.tcpScanNetwork() },
+                onClick = { viewModel.startHybridDiscovery() },
                 icon = {
                     if (isScanning) {
                         CircularProgressIndicator(
@@ -255,23 +257,36 @@ fun TetherApp(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column {
-                                    Text(
-                                        text = device.getDisplayName(),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = if (isSelected) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurface
-                                        },
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = device.getDisplayName(),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = if (device.isOnline) {
+                                                if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                            },
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                        if (!device.isOnline) {
+                                            Text(
+                                                text = "离线",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.error,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
                                     Text(
                                         text = device.ip,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = if (isSelected) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                        color = if (device.isOnline) {
+                                            if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
                                         } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                                         }
                                     )
                                     if (device.note.isNotEmpty()) {
@@ -286,7 +301,7 @@ fun TetherApp(
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = "已选中",
-                                        tint = MaterialTheme.colorScheme.primary
+                                        tint = if (device.isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -308,7 +323,8 @@ fun TetherApp(
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                         contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
+                    ),
+                    enabled = selectedDevice?.isOnline == true
                 ) {
                     Text("🔒 锁定")
                 }
@@ -318,7 +334,8 @@ fun TetherApp(
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
+                    ),
+                    enabled = selectedDevice?.isOnline == true
                 ) {
                     Text("💤 睡眠")
                 }
@@ -328,29 +345,88 @@ fun TetherApp(
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.onErrorContainer
-                    )
+                    ),
+                    enabled = selectedDevice?.isOnline == true
                 ) {
                     Text("⏻ 关机")
                 }
             }
 
-            // ===== 查看画面按钮（选中设备后才显示） =====
+            // ===== 画质切换 + 查看画面 =====
             if (selectedDevice != null) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        val ip = selectedDevice?.ip ?: return@Button
-                        val intent = Intent(context, ScreenActivity::class.java)
-                        intent.putExtra("ip", ip)
-                        context.startActivity(intent)
-                    },
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary,
-                        contentColor = MaterialTheme.colorScheme.onSecondary
-                    )
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("🖥️ 查看画面")
+                    var expanded by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = expanded,
+                        onExpandedChange = { expanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = when (quality) {
+                                0 -> "流畅 (720p)"
+                                1 -> "标准 (1080p)"
+                                else -> "高清 (原始)"
+                            },
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("画质") },
+                            modifier = Modifier
+                                .menuAnchor()
+                                .weight(1f),
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("流畅 (720p)") },
+                                onClick = {
+                                    viewModel.setQuality(0)
+                                    expanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("标准 (1080p)") },
+                                onClick = {
+                                    viewModel.setQuality(1)
+                                    expanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("高清 (原始)") },
+                                onClick = {
+                                    viewModel.setQuality(2)
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            val ip = selectedDevice?.ip ?: return@Button
+                            val intent = Intent(context, ScreenActivity::class.java)
+                            intent.putExtra("ip", ip)
+                            intent.putExtra("quality", quality)
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary,
+                            contentColor = MaterialTheme.colorScheme.onSecondary
+                        ),
+                        enabled = selectedDevice?.isOnline == true
+                    ) {
+                        Text("🖥️ 查看画面")
+                    }
                 }
             }
 

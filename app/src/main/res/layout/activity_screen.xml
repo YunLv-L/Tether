@@ -1,151 +1,71 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="#0F172A">
 
-    <!-- 顶部控制栏 -->
-    <LinearLayout
+    <SurfaceView
+        android:id="@+id/surfaceView"
         android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 左上角信息 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        android:background="#1E293B"
-        android:gravity="center_vertical">
+        android:layout_gravity="top|start"
+        android:orientation="vertical"
+        android:padding="10dp"
+        android:background="#88000000"
+        android:layout_margin="12dp">
 
         <TextView
             android:id="@+id/tvResolution"
-            android:layout_width="0dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
             android:text="1920x1080"
-            android:textColor="#94A3B8"
-            android:textSize="12sp" />
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/tvFps"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="30fps"
+            android:text="0 fps"
             android:textColor="#3B82F6"
-            android:textSize="12sp"
-            android:layout_marginEnd="12dp" />
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+
+    <!-- 右上角控制按钮 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:orientation="horizontal"
+        android:padding="8dp"
+        android:background="#88000000"
+        android:layout_margin="12dp">
 
         <ImageButton
             android:id="@+id/btnRotate"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
             android:src="@android:drawable/ic_menu_rotate"
             android:background="@android:color/transparent"
-            android:contentDescription="旋转" />
-
-        <ImageButton
-            android:id="@+id/btnSettings"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:src="@android:drawable/ic_menu_preferences"
-            android:background="@android:color/transparent"
-            android:contentDescription="设置" />
+            android:contentDescription="旋转"
+            android:scaleType="centerInside" />
 
         <ImageButton
             android:id="@+id/btnClose"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
             android:src="@android:drawable/ic_menu_close_clear_cancel"
             android:background="@android:color/transparent"
-            android:contentDescription="关闭" />
+            android:contentDescription="关闭"
+            android:scaleType="centerInside" />
     </LinearLayout>
 
-    <!-- 画面显示区域 -->
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="#000000">
-
-        <SurfaceView
-            android:id="@+id/surfaceView"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:layout_gravity="center" />
-
-        <TextView
-            android:id="@+id/tvStatus"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="连接中..."
-            android:textColor="#94A3B8"
-            android:textSize="12sp"
-            android:layout_gravity="top|end"
-            android:padding="8dp"
-            android:background="#1E293B"
-            android:alpha="0.7" />
-    </FrameLayout>
-
-    <!-- 底部控制栏 -->
-    <LinearLayout
-        android:id="@+id/bottomControls"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        android:background="#1E293B"
-        android:gravity="center"
-        android:visibility="gone">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="缩放: "
-            android:textColor="#94A3B8"
-            android:textSize="12sp" />
-
-        <ImageButton
-            android:id="@+id/btnZoomOut"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:src="@android:drawable/ic_menu_zoom"
-            android:background="@android:color/transparent"
-            android:contentDescription="缩小"
-            android:scaleX="-1"
-            android:scaleY="1" />
-
-        <SeekBar
-            android:id="@+id/seekZoom"
-            android:layout_width="120dp"
-            android:layout_height="wrap_content"
-            android:max="100"
-            android:progress="100"
-            android:layout_marginStart="8dp"
-            android:layout_marginEnd="8dp" />
-
-        <ImageButton
-            android:id="@+id/btnZoomIn"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:src="@android:drawable/ic_menu_zoom"
-            android:background="@android:color/transparent"
-            android:contentDescription="放大" />
-
-        <View
-            android:layout_width="16dp"
-            android:layout_height="match_parent" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="画质: "
-            android:textColor="#94A3B8"
-            android:textSize="12sp" />
-
-        <Spinner
-            android:id="@+id/spinnerQuality"
-            android:layout_width="80dp"
-            android:layout_height="32dp"
-            android:background="#334155"
-            android:entries="@array/quality_options" />
-    </LinearLayout>
-
-</LinearLayout>
+</FrameLayout>

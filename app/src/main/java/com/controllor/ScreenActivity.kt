@@ -7,10 +7,14 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
-import android.widget.*
+import android.widget.ImageButton
+import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -21,26 +25,31 @@ import java.net.Socket
 
 class ScreenActivity : ComponentActivity() {
     private lateinit var surfaceView: SurfaceView
-    private lateinit var tvStatus: TextView
     private lateinit var tvResolution: TextView
     private lateinit var tvFps: TextView
-    private lateinit var seekZoom: SeekBar
-    private lateinit var spinnerQuality: Spinner
-    private lateinit var bottomControls: View
     private lateinit var btnRotate: ImageButton
-    private lateinit var btnSettings: ImageButton
     private lateinit var btnClose: ImageButton
-    private lateinit var btnZoomIn: ImageButton
-    private lateinit var btnZoomOut: ImageButton
 
     private var socket: Socket? = null
     private var isRunning = false
     private val handler = Handler(Looper.getMainLooper())
     private var currentBitmap: Bitmap? = null
-    private var zoomLevel = 1.0f
-    private var currentOrientation = 0 // 0=竖屏, 1=横屏
+    private var currentOrientation = 0
+
+    // 缩放相关
+    private var scaleFactor = 1.0f
+    private var scaleDetector: ScaleGestureDetector? = null
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var offsetX = 0f
+    private var offsetY = 0f
+
+    // FPS 统计
     private var frameCount = 0
     private var lastFpsUpdate = 0L
+
+    // 画质设置
+    private var qualityLevel = 1
 
     companion object {
         private const val TAG = "ScreenActivity"
@@ -52,46 +61,45 @@ class ScreenActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_screen)
 
-        initViews()
-        setupControls()
-
-        val ip = intent.getStringExtra("ip") ?: run {
-            finish()
-            return
-        }
-
-        tvStatus.text = "连接 $ip ..."
-        lifecycleScope.launch {
-            connectToStream(ip)
-        }
-    }
-
-    private fun initViews() {
         surfaceView = findViewById(R.id.surfaceView)
-        tvStatus = findViewById(R.id.tvStatus)
         tvResolution = findViewById(R.id.tvResolution)
         tvFps = findViewById(R.id.tvFps)
-        seekZoom = findViewById(R.id.seekZoom)
-        spinnerQuality = findViewById(R.id.spinnerQuality)
-        bottomControls = findViewById(R.id.bottomControls)
         btnRotate = findViewById(R.id.btnRotate)
-        btnSettings = findViewById(R.id.btnSettings)
         btnClose = findViewById(R.id.btnClose)
-        btnZoomIn = findViewById(R.id.btnZoomIn)
-        btnZoomOut = findViewById(R.id.btnZoomOut)
 
-        // 质量选项适配器
-        val qualityAdapter = ArrayAdapter.createFromResource(
-            this,
-            R.array.quality_options,
-            android.R.layout.simple_spinner_item
-        )
-        qualityAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        spinnerQuality.adapter = qualityAdapter
-    }
+        qualityLevel = intent.getIntExtra("quality", 1)
 
-    private fun setupControls() {
-        // 旋转
+        scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                scaleFactor *= detector.scaleFactor
+                scaleFactor = scaleFactor.coerceIn(0.3f, 3.0f)
+                updateDisplay()
+                return true
+            }
+        })
+
+        surfaceView.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (event.pointerCount == 1) {
+                        val dx = event.x - lastTouchX
+                        val dy = event.y - lastTouchY
+                        offsetX += dx
+                        offsetY += dy
+                        lastTouchX = event.x
+                        lastTouchY = event.y
+                        updateDisplay()
+                    }
+                }
+            }
+            scaleDetector?.onTouchEvent(event)
+            true
+        }
+
         btnRotate.setOnClickListener {
             currentOrientation = if (currentOrientation == 0) 1 else 0
             requestedOrientation = if (currentOrientation == 0) {
@@ -101,54 +109,20 @@ class ScreenActivity : ComponentActivity() {
             }
         }
 
-        // 设置（显示/隐藏底部控制栏）
-        btnSettings.setOnClickListener {
-            bottomControls.visibility = if (bottomControls.visibility == View.VISIBLE) {
-                View.GONE
-            } else {
-                View.VISIBLE
-            }
-        }
-
-        // 关闭
         btnClose.setOnClickListener {
             finish()
         }
 
-        // 缩放 SeekBar
-        seekZoom.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    zoomLevel = progress.toFloat() / 100f
-                    if (zoomLevel < 0.1f) zoomLevel = 0.1f
-                    updateDisplay()
-                }
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-
-        // 放大
-        btnZoomIn.setOnClickListener {
-            zoomLevel = (zoomLevel + 0.1f).coerceAtMost(3.0f)
-            seekZoom.progress = (zoomLevel * 100).toInt()
-            updateDisplay()
+        val ip = intent.getStringExtra("ip") ?: run {
+            finish()
+            return
         }
 
-        // 缩小
-        btnZoomOut.setOnClickListener {
-            zoomLevel = (zoomLevel - 0.1f).coerceAtLeast(0.1f)
-            seekZoom.progress = (zoomLevel * 100).toInt()
-            updateDisplay()
-        }
+        tvResolution.text = "连接中..."
+        tvFps.text = "0 fps"
 
-        // 画质切换
-        spinnerQuality.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                // 画质切换需要重新连接，这里只做提示
-                Toast.makeText(this@ScreenActivity, "画质将在下次连接生效", Toast.LENGTH_SHORT).show()
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        lifecycleScope.launch {
+            connectToStream(ip)
         }
     }
 
@@ -159,7 +133,6 @@ class ScreenActivity : ComponentActivity() {
                 socket?.soTimeout = TIMEOUT
                 val inputStream = DataInputStream(socket?.getInputStream())
 
-                // 读取屏幕尺寸
                 val sizeInfo = StringBuilder()
                 var ch: Char
                 while (true) {
@@ -177,17 +150,13 @@ class ScreenActivity : ComponentActivity() {
                     val finalHeight = screenHeight
                     handler.post {
                         tvResolution.text = "${finalWidth}x${finalHeight}"
-                        tvStatus.text = "📺 接收中"
                     }
                 }
 
                 isRunning = true
-                var frameCount = 0
-                var lastFpsTime = System.currentTimeMillis()
 
                 while (isRunning) {
                     try {
-                        // 读取长度 (4字节)
                         val lengthBytes = ByteArray(4)
                         var read = 0
                         while (read < 4) {
@@ -200,7 +169,6 @@ class ScreenActivity : ComponentActivity() {
 
                         if (imageLength <= 0 || imageLength > 5 * 1024 * 1024) continue
 
-                        // 读取图像数据
                         val imageData = ByteArray(imageLength)
                         read = 0
                         while (read < imageLength) {
@@ -211,13 +179,13 @@ class ScreenActivity : ComponentActivity() {
                         if (bitmap != null) {
                             frameCount++
                             val now = System.currentTimeMillis()
-                            if (now - lastFpsTime >= 1000) {
+                            if (now - lastFpsUpdate >= 1000) {
                                 val fps = frameCount
                                 handler.post {
-                                    tvFps.text = "${fps}fps"
+                                    tvFps.text = "${fps} fps"
                                 }
                                 frameCount = 0
-                                lastFpsTime = now
+                                lastFpsUpdate = now
                             }
                             handler.post {
                                 currentBitmap = bitmap
@@ -256,28 +224,34 @@ class ScreenActivity : ComponentActivity() {
                 return
             }
 
-            // 计算缩放
             val scaleX = canvasWidth.toFloat() / bmpWidth.toFloat()
             val scaleY = canvasHeight.toFloat() / bmpHeight.toFloat()
             val baseScale = maxOf(scaleX, scaleY)
-            val finalScale = baseScale * zoomLevel
+            val finalScale = baseScale * scaleFactor
 
             val dstWidth = (bmpWidth * finalScale).toInt()
             val dstHeight = (bmpHeight * finalScale).toInt()
-            val left = (canvasWidth - dstWidth) / 2
-            val top = (canvasHeight - dstHeight) / 2
 
-            // 清空画布
+            // 动态计算偏移限制（画面尺寸的 50%）
+            val limitX = dstWidth * 0.5f
+            val limitY = dstHeight * 0.5f
+            offsetX = offsetX.coerceIn(-limitX, limitX)
+            offsetY = offsetY.coerceIn(-limitY, limitY)
+
+            val centerOffsetX = (canvasWidth - dstWidth) / 2f + offsetX
+            val centerOffsetY = (canvasHeight - dstHeight) / 2f + offsetY
+
+            val left = centerOffsetX.toInt()
+            val top = centerOffsetY.toInt()
+
             canvas.drawColor(android.graphics.Color.BLACK)
 
-            // 裁剪防止越界
             val rectLeft = maxOf(left, 0)
             val rectTop = maxOf(top, 0)
             val rectRight = minOf(left + dstWidth, canvasWidth)
             val rectBottom = minOf(top + dstHeight, canvasHeight)
 
             if (rectRight > rectLeft && rectBottom > rectTop) {
-                // 计算源图对应的裁剪区域
                 val srcLeft = if (left < 0) (-left.toFloat() / finalScale).toInt() else 0
                 val srcTop = if (top < 0) (-top.toFloat() / finalScale).toInt() else 0
                 val srcRight = srcLeft + ((rectRight - rectLeft) / finalScale).toInt()
@@ -302,13 +276,11 @@ class ScreenActivity : ComponentActivity() {
         super.onDestroy()
         isRunning = false
         socket?.close()
-        currentBitmap?.recycle()
         currentBitmap = null
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
-        // 屏幕旋转后刷新画面
         handler.postDelayed({ updateDisplay() }, 100)
     }
 }
