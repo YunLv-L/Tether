@@ -9,7 +9,6 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -213,7 +212,7 @@ class TetherViewModel : ViewModel() {
 
                     Log.d("Tether", "UDP 监听启动，端口 $udpPort")
 
-                    while (currentCoroutineContext().isActive) {
+                    while (coroutineContext.isActive) {
                         try {
                             socket.receive(packet)
                             val message = String(packet.data, 0, packet.length)
