@@ -21,11 +21,9 @@ object ShizukuManager {
             ShizukuProvider.enableMultiProcessSupport()
             isInitialized = true
 
-            Shizuku.addBinderReceivedListener(object : Shizuku.OnBinderReceivedListener {
-                override fun onBinderReceived() {
-                    Log.d(TAG, "✅ Shizuku Binder 已连接")
-                    binderReceivedListeners.forEach { it.invoke() }
-                }
+            Shizuku.addBinderReceivedListener(Shizuku.OnBinderReceivedListener {
+                Log.d(TAG, "✅ Shizuku Binder 已连接")
+                binderReceivedListeners.forEach { it.invoke() }
             })
 
             Shizuku.addBinderDeadListener(object : Shizuku.OnBinderDeadListener {
