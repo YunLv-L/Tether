@@ -4,10 +4,11 @@
     android:layout_height="match_parent"
     android:background="#0F172A">
 
-    <SurfaceView
-        android:id="@+id/surfaceView"
+    <ImageView
+        android:id="@+id/imageView"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:scaleType="matrix" />
 
     <!-- 左上角信息 -->
     <LinearLayout
