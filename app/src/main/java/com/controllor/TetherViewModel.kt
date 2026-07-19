@@ -64,8 +64,10 @@ class TetherViewModel : ViewModel() {
     private val tcpPort = 5556
     private val qualityPort = 5558
     private val udpPort = 5555
+    private val cacheTimeout = 30000L
 
     private var scanJob: Job? = null
+    private var udpListenerJob: Job? = null
     private lateinit var prefs: android.content.SharedPreferences
     private var nsdManager: NsdManager? = null
     private var context: Context? = null
@@ -73,7 +75,6 @@ class TetherViewModel : ViewModel() {
 
     // UDP 广播发现缓存
     private val udpCache = mutableMapOf<String, DeviceInfo>()
-    private val cacheTimeout = 30000L
 
     fun init(context: Context) {
         this.context = context
@@ -212,7 +213,7 @@ class TetherViewModel : ViewModel() {
 
                     Log.d("Tether", "UDP 监听启动，端口 $udpPort")
 
-                    while (true) {
+                    while (currentCoroutineContext().isActive) {
                         try {
                             socket.receive(packet)
                             val message = String(packet.data, 0, packet.length)
@@ -263,8 +264,6 @@ class TetherViewModel : ViewModel() {
                         } catch (e: Exception) {
                             Log.e("Tether", "UDP 接收异常", e)
                         }
-
-                        if (!isActive) break
                     }
                 } catch (e: Exception) {
                     Log.e("Tether", "UDP 监听启动失败", e)
@@ -275,8 +274,6 @@ class TetherViewModel : ViewModel() {
             }
         }
     }
-
-    private var udpListenerJob: Job? = null
 
     fun stopUdpListener() {
         udpListenerJob?.cancel()
