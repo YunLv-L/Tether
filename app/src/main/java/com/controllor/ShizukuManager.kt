@@ -21,8 +21,8 @@ object ShizukuManager {
             ShizukuProvider.enableMultiProcessSupport()
             isInitialized = true
 
-            // ✅ 参考 Demo 使用 addBinderReceivedListenerSticky
-            Shizuku.addBinderReceivedListenerSticky {
+            // ✅ 官方文档写法：无参数
+            Shizuku.addBinderReceivedListener {
                 Log.d(TAG, "✅ Shizuku Binder 已连接")
                 binderReceivedListeners.forEach { it.invoke() }
             }
