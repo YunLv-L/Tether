@@ -1,6 +1,5 @@
 package com.tether.controller
 
-import android.os.IBinder
 import android.os.RemoteException
 import android.util.Log
 import java.io.BufferedReader
@@ -12,6 +11,7 @@ class UserService : IUserService.Stub() {
         private const val TAG = "UserService"
     }
 
+    @Throws(RemoteException::class)
     override fun executeCommand(command: String): String {
         Log.d(TAG, "执行命令: $command")
         return try {
@@ -33,6 +33,7 @@ class UserService : IUserService.Stub() {
         }
     }
 
+    @Throws(RemoteException::class)
     override fun ping() {
         Log.d(TAG, "UserService ping 成功")
     }

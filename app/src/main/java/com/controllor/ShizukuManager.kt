@@ -7,8 +7,6 @@ import android.os.RemoteException
 import android.util.Log
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuProvider
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 object ShizukuManager {
     private const val TAG = "ShizukuManager"
@@ -18,7 +16,6 @@ object ShizukuManager {
     private var userService: IUserService? = null
     private var userServiceConnected = false
 
-    // 监听器实例
     private var binderReceivedListener: Shizuku.OnBinderReceivedListener? = null
     private var binderDeadListener: Shizuku.OnBinderDeadListener? = null
     private var permissionResultListener: Shizuku.OnPermissionResultListener? = null
@@ -26,7 +23,6 @@ object ShizukuManager {
     private val binderReceivedCallbacks = mutableListOf<() -> Unit>()
     private val binderDeadCallbacks = mutableListOf<() -> Unit>()
 
-    // UserService 参数
     private val userServiceArgs = Shizuku.UserServiceArgs(
         ComponentName(
             BuildConfig.APPLICATION_ID,
@@ -57,7 +53,6 @@ object ShizukuManager {
         }
     }
 
-    // ==================== 初始化 ====================
     @Synchronized
     fun init(context: Context) {
         if (isInitialized) {
@@ -68,29 +63,35 @@ object ShizukuManager {
         try {
             ShizukuProvider.enableMultiProcessSupport()
 
-            binderReceivedListener = Shizuku.OnBinderReceivedListener {
-                Log.d(TAG, "✅ Shizuku Binder 已连接")
-                binderReceivedCallbacks.forEach { it.invoke() }
-                if (!userServiceConnected) {
-                    bindUserService()
+            binderReceivedListener = object : Shizuku.OnBinderReceivedListener {
+                override fun onBinderReceived() {
+                    Log.d(TAG, "✅ Shizuku Binder 已连接")
+                    binderReceivedCallbacks.forEach { it.invoke() }
+                    if (!userServiceConnected) {
+                        bindUserService()
+                    }
                 }
             }
-            binderDeadListener = Shizuku.OnBinderDeadListener {
-                Log.d(TAG, "❌ Shizuku Binder 已断开")
-                binderDeadCallbacks.forEach { it.invoke() }
-                userService = null
-                userServiceConnected = false
+            binderDeadListener = object : Shizuku.OnBinderDeadListener {
+                override fun onBinderDead() {
+                    Log.d(TAG, "❌ Shizuku Binder 已断开")
+                    binderDeadCallbacks.forEach { it.invoke() }
+                    userService = null
+                    userServiceConnected = false
+                }
             }
 
             Shizuku.addBinderReceivedListener(binderReceivedListener)
             Shizuku.addBinderDeadListener(binderDeadListener)
 
-            permissionResultListener = Shizuku.OnPermissionResultListener { requestCode, grantResult ->
-                if (requestCode == PERMISSION_REQUEST_CODE) {
-                    val granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED
-                    Log.d(TAG, if (granted) "✅ Shizuku 权限已授予" else "❌ Shizuku 权限被拒绝")
-                    if (granted) {
-                        bindUserService()
+            permissionResultListener = object : Shizuku.OnPermissionResultListener {
+                override fun onPermissionResult(requestCode: Int, grantResult: Int) {
+                    if (requestCode == PERMISSION_REQUEST_CODE) {
+                        val granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        Log.d(TAG, if (granted) "✅ Shizuku 权限已授予" else "❌ Shizuku 权限被拒绝")
+                        if (granted) {
+                            bindUserService()
+                        }
                     }
                 }
             }
@@ -112,12 +113,9 @@ object ShizukuManager {
     @Synchronized
     fun destroy() {
         unbindUserService()
-        runCatching { binderReceivedListener?.let { Shizuku.removeBinderReceivedListener(it) } }
-            .onFailure { Log.w(TAG, "移除 BinderReceivedListener 失败", it) }
-        runCatching { binderDeadListener?.let { Shizuku.removeBinderDeadListener(it) } }
-            .onFailure { Log.w(TAG, "移除 BinderDeadListener 失败", it) }
-        runCatching { permissionResultListener?.let { Shizuku.removePermissionResultListener(it) } }
-            .onFailure { Log.w(TAG, "移除 PermissionResultListener 失败", it) }
+        try { binderReceivedListener?.let { Shizuku.removeBinderReceivedListener(it) } } catch (e: Exception) { /* ignore */ }
+        try { binderDeadListener?.let { Shizuku.removeBinderDeadListener(it) } } catch (e: Exception) { /* ignore */ }
+        try { permissionResultListener?.let { Shizuku.removePermissionResultListener(it) } } catch (e: Exception) { /* ignore */ }
         binderReceivedCallbacks.clear()
         binderDeadCallbacks.clear()
         binderReceivedListener = null
@@ -129,7 +127,6 @@ object ShizukuManager {
         Log.d(TAG, "Shizuku 已销毁")
     }
 
-    // ==================== UserService 绑定/解绑 ====================
     private fun bindUserService() {
         if (userServiceConnected) {
             Log.d(TAG, "UserService 已连接，跳过绑定")
@@ -160,26 +157,28 @@ object ShizukuManager {
         userServiceConnected = false
     }
 
-    // ==================== 状态检查 ====================
     fun isAvailable(): Boolean {
-        return runCatching { Shizuku.pingBinder() }.getOrElse { false }
+        return try {
+            Shizuku.pingBinder()
+        } catch (e: Exception) {
+            false
+        }
     }
 
     fun isGranted(): Boolean {
-        return runCatching {
+        return try {
             Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
-        }.getOrElse { false }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     fun canUseHighPrivilege(): Boolean {
         return isAvailable() && isGranted() && !Shizuku.isPreV11()
     }
 
-    fun getUserService(): IUserService? = userService
-
     fun isUserServiceReady(): Boolean = userServiceConnected && userService != null
 
-    // ==================== 权限请求 ====================
     fun requestPermission(onResult: ((Boolean) -> Unit)? = null) {
         if (Shizuku.isPreV11()) {
             Log.w(TAG, "⚠️ Shizuku 版本过旧")
@@ -202,8 +201,7 @@ object ShizukuManager {
                 if (requestCode == PERMISSION_REQUEST_CODE) {
                     val granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED
                     onResult?.invoke(granted)
-                    runCatching { Shizuku.removePermissionResultListener(this) }
-                        .onFailure { Log.w(TAG, "移除权限监听器失败", it) }
+                    try { Shizuku.removePermissionResultListener(this) } catch (e: Exception) { /* ignore */ }
                     if (granted) {
                         bindUserService()
                     }
@@ -216,13 +214,11 @@ object ShizukuManager {
             Shizuku.requestPermission(PERMISSION_REQUEST_CODE)
         } catch (e: Exception) {
             Log.e(TAG, "❌ 请求权限异常", e)
-            runCatching { Shizuku.removePermissionResultListener(listener) }
-                .onFailure { Log.w(TAG, "异常后移除权限监听器失败", it) }
+            try { Shizuku.removePermissionResultListener(listener) } catch (ex: Exception) { /* ignore */ }
             onResult?.invoke(false)
         }
     }
 
-    // ==================== 执行命令（通过 UserService） ====================
     fun executeCommand(command: String): String {
         if (!isUserServiceReady()) {
             Log.w(TAG, "UserService 未就绪，尝试重新绑定")
@@ -242,7 +238,6 @@ object ShizukuManager {
         }
     }
 
-    // ==================== 快捷方法 ====================
     fun pingHost(ip: String, timeout: Int = 1): Boolean {
         val result = executeCommand("ping -c 1 -W $timeout $ip 2>/dev/null && echo alive")
         return result.contains("alive") || result.contains("1 received")
@@ -261,7 +256,6 @@ object ShizukuManager {
         )
     }
 
-    // ==================== 回调管理 ====================
     fun addBinderReceivedListener(listener: () -> Unit) {
         binderReceivedCallbacks.add(listener)
         if (isAvailable()) {
