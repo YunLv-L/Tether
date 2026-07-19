@@ -75,6 +75,9 @@ class TetherViewModel : ViewModel() {
     // UDP 广播发现缓存
     private val udpCache = mutableMapOf<String, DeviceInfo>()
 
+    @Volatile
+    private var isUdpListening = false
+
     fun init(context: Context) {
         this.context = context
         prefs = context.getSharedPreferences("tether_devices", Context.MODE_PRIVATE)
@@ -196,7 +199,7 @@ class TetherViewModel : ViewModel() {
     }
 
     fun startUdpListener() {
-        if (udpListenerJob?.isActive == true) return
+        if (isUdpListening) return
 
         udpListenerJob = viewModelScope.launch {
             withContext(Dispatchers.IO) {
@@ -210,9 +213,10 @@ class TetherViewModel : ViewModel() {
                     val buffer = ByteArray(1024)
                     val packet = DatagramPacket(buffer, buffer.size)
 
+                    isUdpListening = true
                     Log.d("Tether", "UDP 监听启动，端口 $udpPort")
 
-                    while (coroutineContext.isActive) {
+                    while (isUdpListening) {
                         try {
                             socket.receive(packet)
                             val message = String(packet.data, 0, packet.length)
@@ -234,7 +238,6 @@ class TetherViewModel : ViewModel() {
                                     )
 
                                     synchronized(udpCache) {
-                                        // 同ID或同IP只保留最新
                                         val existingKey = udpCache.keys.find { key ->
                                             val existing = udpCache[key]
                                             existing != null && (existing.id == device.id || existing.ip == device.ip)
@@ -249,6 +252,7 @@ class TetherViewModel : ViewModel() {
                                         udpCache[id] = device
                                         updateDevicesFromCache()
                                     }
+                                    Log.d("Tether", "✅ UDP 发现设备: ${device.ip} (${device.name})")
                                 }
                             }
                         } catch (e: SocketTimeoutException) {
@@ -268,6 +272,7 @@ class TetherViewModel : ViewModel() {
                     Log.e("Tether", "UDP 监听启动失败", e)
                 } finally {
                     socket?.close()
+                    isUdpListening = false
                     Log.d("Tether", "UDP 监听已停止")
                 }
             }
@@ -275,6 +280,7 @@ class TetherViewModel : ViewModel() {
     }
 
     fun stopUdpListener() {
+        isUdpListening = false
         udpListenerJob?.cancel()
         udpListenerJob = null
         Log.d("Tether", "UDP 监听停止请求")
