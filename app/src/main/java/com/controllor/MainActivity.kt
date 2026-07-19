@@ -26,6 +26,10 @@ import com.tether.controller.ui.theme.TetherTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 初始化 Shizuku
+        ShizukuManager.init(applicationContext)
+
         setContent {
             TetherTheme {
                 val viewModel: TetherViewModel = viewModel()
@@ -329,11 +333,37 @@ fun TetherApp(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("深度扫描")
+                Text("深度扫描（兜底）")
             }
-            
+
             Spacer(modifier = Modifier.height(8.dp))
 
+            // ===== Shizuku 扫描按钮 =====
+            OutlinedButton(
+                onClick = {
+                    if (!ShizukuManager.canUseHighPrivilege()) {
+                        ShizukuManager.requestPermission()
+                        return@OutlinedButton
+                    }
+                    viewModel.shizukuScan()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.tertiary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(if (ShizukuManager.canUseHighPrivilege()) "Shizuku 扫描" else "启动 Shizuku")
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             // 指令按钮
             Row(
@@ -378,8 +408,7 @@ fun TetherApp(
             // ===== 画质切换 + 查看画面 =====
             if (selectedDevice != null) {
                 Spacer(modifier = Modifier.height(12.dp))
-                
-                // 画质切换
+
                 var expanded by remember { mutableStateOf(false) }
                 ExposedDropdownMenuBox(
                     expanded = expanded,
@@ -431,11 +460,10 @@ fun TetherApp(
                         )
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(8.dp))
-                
-                // 查看画面按钮
-               Button(
+
+                Button(
                     onClick = {
                         val ip = selectedDevice?.ip ?: return@Button
                         android.util.Log.d("Tether", "查看画面, IP: $ip")
@@ -476,21 +504,6 @@ fun TetherApp(
             }
         }
     }
-    
-    // ===== 清除设备数据按钮（Debug 模式下显示） =====
-    //if (isDebugMode) {
-    //    Spacer(modifier = Modifier.height(8.dp))
-    //    Button(
-    //        onClick = { viewModel.clearAllDevices() },
-    //        modifier = Modifier.fillMaxWidth(),
-    //        colors = ButtonDefaults.buttonColors(
-    //            containerColor = MaterialTheme.colorScheme.error,
-    //            contentColor = MaterialTheme.colorScheme.onError
-    //        )
-    //    ) {
-    //        Text("🗑️ 清除所有设备数据")
-    //    }
-    //}
 
     // ===== 长按菜单对话框 =====
     if (showDeleteDialog != null) {

@@ -72,7 +72,6 @@ class TetherViewModel : ViewModel() {
     private var context: Context? = null
     private var mdnsListener: NsdManager.DiscoveryListener? = null
 
-    // UDP 广播发现缓存
     private val udpCache = mutableMapOf<String, DeviceInfo>()
 
     @Volatile
@@ -346,6 +345,101 @@ class TetherViewModel : ViewModel() {
                     "深度扫描未发现设备"
                 }
             }
+        }
+    }
+
+    // ==================== Shizuku 高权限扫描 ====================
+    fun shizukuScan() {
+        if (!ShizukuManager.canUseHighPrivilege()) {
+            _statusMessage.value = "Shizuku 不可用，请先启动 Shizuku"
+            return
+        }
+
+        if (_isScanning.value) {
+            stopScan()
+            return
+        }
+
+        _devices.value = emptyList()
+        _selectedDevice.value = null
+        _isScanning.value = true
+        _statusMessage.value = "Shizuku 扫描中..."
+        _scanProgress.value = "0/254"
+
+        scanJob = viewModelScope.launch {
+            val baseIp = getLocalIpBase()
+            val total = 254
+            var foundCount = 0
+
+            withContext(Dispatchers.IO) {
+                for (i in 1..total) {
+                    if (!_isScanning.value) break
+                    val ip = "$baseIp.$i"
+
+                    if (ShizukuManager.pingHost(ip, 1)) {
+                        if (ShizukuManager.checkPort(ip, tcpPort)) {
+                            val deviceInfo = shizukuGetDeviceInfo(ip)
+                            if (deviceInfo != null) {
+                                foundCount++
+                                val currentMap = _devices.value.associateBy { it.id }.toMutableMap()
+                                currentMap[deviceInfo.id] = deviceInfo
+                                withContext(Dispatchers.Main) {
+                                    _devices.value = currentMap.values.toList()
+                                    _statusMessage.value = "发现设备: ${deviceInfo.ip} (${deviceInfo.name})"
+                                }
+                            }
+                        }
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        _scanProgress.value = "$i/254"
+                    }
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                _isScanning.value = false
+                _scanProgress.value = "254/254"
+                _statusMessage.value = if (foundCount > 0) {
+                    "发现 ${foundCount} 台设备 (Shizuku)"
+                } else {
+                    "未发现设备，请检查 PC Agent 是否运行"
+                }
+            }
+        }
+    }
+
+    private suspend fun shizukuGetDeviceInfo(ip: String): DeviceInfo? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val result = ShizukuManager.executeCommand(
+                    "echo 'ping' | timeout 2 nc $ip $tcpPort 2>/dev/null"
+                )
+                val finalResult = if (result.isEmpty()) {
+                    ShizukuManager.executeCommand(
+                        "timeout 2 bash -c \"echo 'ping' > /dev/tcp/$ip/$tcpPort && cat < /dev/tcp/$ip/$tcpPort\" 2>/dev/null"
+                    )
+                } else {
+                    result
+                }
+
+                if (finalResult.isNotEmpty() && finalResult.startsWith("pong")) {
+                    val parts = finalResult.split("|")
+                    val deviceName = if (parts.size >= 2) parts[1] else "PC"
+                    val machineCode = if (parts.size >= 4) parts[3] else ""
+                    val id = if (machineCode.isNotEmpty()) machineCode else "$deviceName|$ip"
+                    return@withContext DeviceInfo(
+                        id = id,
+                        ip = ip,
+                        name = deviceName,
+                        isOnline = true,
+                        machineCode = machineCode
+                    )
+                }
+            } catch (e: Exception) {
+                Log.d("Tether", "Shizuku 获取设备信息失败: $ip", e)
+            }
+            null
         }
     }
 
