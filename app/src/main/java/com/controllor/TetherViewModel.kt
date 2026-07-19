@@ -301,38 +301,20 @@ class TetherViewModel : ViewModel() {
         startUdpListener()
 
         scanJob = viewModelScope.launch {
-            val foundDevices = mutableMapOf<String, DeviceInfo>()
             var mdnsFound = false
 
-            val mdnsDeferred = async {
-                try {
-                    mdnsFound = performMdnsDiscovery(foundDevices)
-                } catch (e: Exception) {
-                    Log.d("Tether", "mDNS 异常: ${e.message}")
-                }
+            try {
+                mdnsFound = performMdnsDiscovery()
+            } catch (e: Exception) {
+                Log.d("Tether", "mDNS 异常: ${e.message}")
             }
-
-            val tcpDeferred = async {
-                delay(5000)
-                if (_devices.value.isEmpty()) {
-                    withContext(Dispatchers.Main) {
-                        _statusMessage.value = "切换到深度扫描..."
-                    }
-                    performTcpDiscovery(foundDevices)
-                } else {
-                    Log.d("Tether", "已通过 UDP/mDNS 发现设备，跳过 TCP 扫描")
-                }
-            }
-
-            mdnsDeferred.await()
-            tcpDeferred.await()
 
             withContext(Dispatchers.Main) {
                 val onlineCount = _devices.value.count { it.isOnline }
                 _isScanning.value = false
                 _scanProgress.value = "254/254"
                 _statusMessage.value = if (onlineCount > 0) {
-                    "发现 ${onlineCount} 台在线设备 (mDNS: ${if (mdnsFound) "✓" else "✗"})"
+                    "发现 ${onlineCount} 台设备 (广播: UDP + mDNS)"
                 } else {
                     "未发现设备，请检查 PC Agent 是否运行，或手动输入 IP"
                 }
@@ -340,8 +322,35 @@ class TetherViewModel : ViewModel() {
         }
     }
 
+    // ==================== 深度扫描（手动触发，兜底） ====================
+    fun deepScan() {
+        if (_isScanning.value) {
+            _statusMessage.value = "扫描进行中..."
+            return
+        }
+        _isScanning.value = true
+        _statusMessage.value = "深度扫描中..."
+        _scanProgress.value = "0/254"
+
+        scanJob = viewModelScope.launch {
+            val foundDevices = mutableMapOf<String, DeviceInfo>()
+            performTcpDiscovery(foundDevices)
+
+            withContext(Dispatchers.Main) {
+                val onlineCount = _devices.value.count { it.isOnline }
+                _isScanning.value = false
+                _scanProgress.value = "254/254"
+                _statusMessage.value = if (onlineCount > 0) {
+                    "发现 ${onlineCount} 台设备 (深度扫描)"
+                } else {
+                    "深度扫描未发现设备"
+                }
+            }
+        }
+    }
+
     // ==================== mDNS 发现 ====================
-    private suspend fun performMdnsDiscovery(foundDevices: MutableMap<String, DeviceInfo>): Boolean {
+    private suspend fun performMdnsDiscovery(): Boolean {
         val manager = nsdManager ?: return false
         var found = false
         var listener: NsdManager.DiscoveryListener? = null
@@ -360,8 +369,20 @@ class TetherViewModel : ViewModel() {
                         isOnline = true,
                         machineCode = machineCode
                     )
-                    synchronized(foundDevices) {
-                        foundDevices[id] = device
+                    synchronized(udpCache) {
+                        val existingKey = udpCache.keys.find { key ->
+                            val existing = udpCache[key]
+                            existing != null && (existing.id == device.id || existing.ip == device.ip)
+                        }
+                        if (existingKey != null) {
+                            udpCache.remove(existingKey)
+                        }
+                        if (udpCache.size >= 50) {
+                            val oldestKey = udpCache.minByOrNull { it.value.hashCode() }?.key
+                            oldestKey?.let { udpCache.remove(it) }
+                        }
+                        udpCache[id] = device
+                        updateDevicesFromCache()
                     }
                     found = true
                     _statusMessage.value = "发现设备: $ip:$name (mDNS)"
@@ -421,7 +442,7 @@ class TetherViewModel : ViewModel() {
         return found
     }
 
-    // ==================== TCP 深度扫描（兜底） ====================
+    // ==================== TCP 深度扫描（兜底，手动触发） ====================
     private suspend fun performTcpDiscovery(foundDevices: MutableMap<String, DeviceInfo>) {
         val baseIp = getLocalIpBase()
         val total = 254
@@ -465,15 +486,24 @@ class TetherViewModel : ViewModel() {
                                 isOnline = true,
                                 machineCode = machineCode
                             )
-                            synchronized(foundDevices) {
-                                foundDevices[id] = device
+                            synchronized(udpCache) {
+                                val existingKey = udpCache.keys.find { key ->
+                                    val existing = udpCache[key]
+                                    existing != null && (existing.id == device.id || existing.ip == device.ip)
+                                }
+                                if (existingKey != null) {
+                                    udpCache.remove(existingKey)
+                                }
+                                if (udpCache.size >= 50) {
+                                    val oldestKey = udpCache.minByOrNull { it.value.hashCode() }?.key
+                                    oldestKey?.let { udpCache.remove(it) }
+                                }
+                                udpCache[id] = device
+                                updateDevicesFromCache()
                             }
                             Log.d("Tether", "✅ TCP 发现: $ip ($deviceName)")
                             withContext(Dispatchers.Main) {
                                 _statusMessage.value = "发现: $ip:$deviceName"
-                                val currentMap = _devices.value.associateBy { it.id }.toMutableMap()
-                                currentMap[device.id] = device
-                                _devices.value = currentMap.values.toList()
                             }
                         }
                     } catch (e: Exception) { /* 跳过 */ }

@@ -313,6 +313,28 @@ fun TetherApp(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // ===== 🔍 深度扫描按钮 =====
+            OutlinedButton(
+                onClick = { viewModel.deepScan() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("深度扫描")
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+
+
             // 指令按钮
             Row(
                 modifier = Modifier.fillMaxWidth(),
