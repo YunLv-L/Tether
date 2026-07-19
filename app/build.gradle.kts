@@ -20,6 +20,13 @@ android {
         }
     }
 
+    // 添加 AIDL 源集配置
+    sourceSets {
+        getByName("main") {
+            aidl.srcDirs("src/main/aidl")
+        }
+    }
+
     buildFeatures {
         compose = true
     }
