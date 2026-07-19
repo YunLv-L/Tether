@@ -19,21 +19,28 @@ Third-Party Notices
 
 This product includes the following third-party software:
 
-Kotlin
-Copyright (c) 2010-2026 JetBrains s.r.o.
-https://kotlinlang.org/
-License: Apache License 2.0
+Android:
+- Kotlin
+  Copyright (c) 2010-2026 JetBrains s.r.o.
+  https://kotlinlang.org/
+  License: Apache License 2.0
 
-Android SDK
-Copyright (c) 2005-2026 Google LLC
-https://developer.android.com/
-License: Apache License 2.0
+- Android SDK
+  Copyright (c) 2005-2026 Google LLC
+  https://developer.android.com/
+  License: Apache License 2.0
 
-AndroidX Compose Material 3
-Copyright (c) 2019-2026 Google LLC
-License: Apache License 2.0
+- AndroidX Compose Material 3
+  Copyright (c) 2019-2026 Google LLC
+  License: Apache License 2.0
 
-.NET 8 Runtime
-Copyright (c) Microsoft Corporation
-https://dotnet.microsoft.com/
-License: MIT
+- Shizuku (rikka.shizuku)
+  Copyright (c) 2019 rikka
+  https://github.com/RikkaApps/Shizuku-API
+  License: Apache License 2.0
+
+PC (Windows):
+- .NET 8 Runtime
+  Copyright (c) Microsoft Corporation
+  https://dotnet.microsoft.com/
+  License: MIT
