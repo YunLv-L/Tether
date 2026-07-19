@@ -21,20 +21,16 @@ object ShizukuManager {
             ShizukuProvider.enableMultiProcessSupport()
             isInitialized = true
 
-            // ✅ 修复：使用 object 创建监听器
-            Shizuku.addBinderReceivedListener(object : Shizuku.OnBinderReceivedListener {
-                override fun onBinderReceived(p0: Int) {
-                    Log.d(TAG, "✅ Shizuku Binder 已连接")
-                    binderReceivedListeners.forEach { it.invoke() }
-                }
-            })
+            // ✅ 参考 Demo 使用 addBinderReceivedListenerSticky
+            Shizuku.addBinderReceivedListenerSticky {
+                Log.d(TAG, "✅ Shizuku Binder 已连接")
+                binderReceivedListeners.forEach { it.invoke() }
+            }
 
-            Shizuku.addBinderDeadListener(object : Shizuku.OnBinderDeadListener {
-                override fun onBinderDead(p0: Int) {
-                    Log.d(TAG, "❌ Shizuku Binder 已断开")
-                    binderDeadListeners.forEach { it.invoke() }
-                }
-            })
+            Shizuku.addBinderDeadListener {
+                Log.d(TAG, "❌ Shizuku Binder 已断开")
+                binderDeadListeners.forEach { it.invoke() }
+            }
 
             Log.d(TAG, "✅ Shizuku 初始化完成")
         } catch (e: Exception) {
