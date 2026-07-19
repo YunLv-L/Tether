@@ -21,13 +21,16 @@ object ShizukuManager {
             ShizukuProvider.enableMultiProcessSupport()
             isInitialized = true
 
-            Shizuku.addBinderReceivedListener(Shizuku.OnBinderReceivedListener {
-                Log.d(TAG, "✅ Shizuku Binder 已连接")
-                binderReceivedListeners.forEach { it.invoke() }
+            // ✅ 修复：使用 object 创建监听器
+            Shizuku.addBinderReceivedListener(object : Shizuku.OnBinderReceivedListener {
+                override fun onBinderReceived(p0: Int) {
+                    Log.d(TAG, "✅ Shizuku Binder 已连接")
+                    binderReceivedListeners.forEach { it.invoke() }
+                }
             })
 
             Shizuku.addBinderDeadListener(object : Shizuku.OnBinderDeadListener {
-                override fun onBinderDead() {
+                override fun onBinderDead(p0: Int) {
                     Log.d(TAG, "❌ Shizuku Binder 已断开")
                     binderDeadListeners.forEach { it.invoke() }
                 }
@@ -126,7 +129,6 @@ object ShizukuManager {
             return ""
         } ?: return ""
 
-        // Shizuku 执行 shell 命令的 transaction code
         val transactionCode = 16777116
 
         return try {
@@ -139,8 +141,8 @@ object ShizukuManager {
                 data.writeString(null)
                 binder.transact(transactionCode, data, reply, 0)
                 val result = reply.readString() ?: ""
-                reply.readInt() // 跳过 exit code
-                reply.readInt() // 跳过 error
+                reply.readInt()
+                reply.readInt()
                 result
             } finally {
                 data.recycle()
@@ -159,7 +161,6 @@ object ShizukuManager {
     }
 
     fun checkPort(ip: String, port: Int, timeout: Int = 1): Boolean {
-        // 用 /dev/tcp 探测端口
         val result = executeCommand(
             "timeout $timeout bash -c \"echo >/dev/tcp/$ip/$port\" 2>/dev/null && echo 'open'"
         )
