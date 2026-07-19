@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -72,8 +73,7 @@ class TetherViewModel : ViewModel() {
 
     // UDP 广播发现缓存
     private val udpCache = mutableMapOf<String, DeviceInfo>()
-    private val cacheTimeout = 30000L // 30秒
-    private var udpListenerJob: Job? = null
+    private val cacheTimeout = 30000L
 
     fun init(context: Context) {
         this.context = context
@@ -183,7 +183,18 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    // ==================== UDP 广播发现（被动监听） ====================
+    // ==================== UDP 广播发现 ====================
+    private fun updateDevicesFromCache() {
+        val now = System.currentTimeMillis()
+        val aliveDevices = udpCache.filter { now - it.value.hashCode() < cacheTimeout }
+        val currentMap = _devices.value.associateBy { it.id }.toMutableMap()
+        aliveDevices.values.forEach { device ->
+            currentMap[device.id] = device.copy(isOnline = true)
+        }
+        _devices.value = currentMap.values.toList()
+        saveDevices()
+    }
+
     fun startUdpListener() {
         if (udpListenerJob?.isActive == true) return
 
@@ -201,7 +212,7 @@ class TetherViewModel : ViewModel() {
 
                     Log.d("Tether", "UDP 监听启动，端口 $udpPort")
 
-                    while (isActive) {
+                    while (true) {
                         try {
                             socket.receive(packet)
                             val message = String(packet.data, 0, packet.length)
@@ -222,9 +233,8 @@ class TetherViewModel : ViewModel() {
                                         machineCode = machineCode
                                     )
 
-                                    // 更新缓存：同ID或同IP只保留最新的
                                     synchronized(udpCache) {
-                                        // 查找同ID或同IP的旧设备
+                                        // 同ID或同IP只保留最新
                                         val existingKey = udpCache.keys.find { key ->
                                             val existing = udpCache[key]
                                             existing != null && (existing.id == device.id || existing.ip == device.ip)
@@ -232,20 +242,16 @@ class TetherViewModel : ViewModel() {
                                         if (existingKey != null) {
                                             udpCache.remove(existingKey)
                                         }
-                                        // 如果缓存满了，移除最早的
                                         if (udpCache.size >= 50) {
                                             val oldestKey = udpCache.minByOrNull { it.value.hashCode() }?.key
                                             oldestKey?.let { udpCache.remove(it) }
                                         }
                                         udpCache[id] = device
-
-                                        // 更新设备列表（去重合并）
                                         updateDevicesFromCache()
                                     }
                                 }
                             }
                         } catch (e: SocketTimeoutException) {
-                            // 超时，检查是否有过期设备
                             synchronized(udpCache) {
                                 val now = System.currentTimeMillis()
                                 val expiredKeys = udpCache.filter { now - it.value.hashCode() > cacheTimeout }.keys
@@ -257,6 +263,8 @@ class TetherViewModel : ViewModel() {
                         } catch (e: Exception) {
                             Log.e("Tether", "UDP 接收异常", e)
                         }
+
+                        if (!isActive) break
                     }
                 } catch (e: Exception) {
                     Log.e("Tether", "UDP 监听启动失败", e)
@@ -268,18 +276,7 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    private fun updateDevicesFromCache() {
-        synchronized(udpCache) {
-            val now = System.currentTimeMillis()
-            val aliveDevices = udpCache.filter { now - it.value.hashCode() < cacheTimeout }
-            val currentMap = _devices.value.associateBy { it.id }.toMutableMap()
-            aliveDevices.values.forEach { device ->
-                currentMap[device.id] = device
-            }
-            _devices.value = currentMap.values.toList()
-            saveDevices()
-        }
-    }
+    private var udpListenerJob: Job? = null
 
     fun stopUdpListener() {
         udpListenerJob?.cancel()
@@ -287,7 +284,7 @@ class TetherViewModel : ViewModel() {
         Log.d("Tether", "UDP 监听停止请求")
     }
 
-    // ==================== 混合发现：UDP + mDNS + TCP 降级 ====================
+    // ==================== 混合发现 ====================
     fun startHybridDiscovery() {
         if (_isScanning.value) {
             stopScan()
@@ -299,10 +296,8 @@ class TetherViewModel : ViewModel() {
         _statusMessage.value = "正在监听设备广播..."
         _scanProgress.value = "0/254"
 
-        // 1. 启动 UDP 监听（被动发现）
         startUdpListener()
 
-        // 2. 启动 mDNS 发现
         scanJob = viewModelScope.launch {
             val foundDevices = mutableMapOf<String, DeviceInfo>()
             var mdnsFound = false
@@ -315,9 +310,7 @@ class TetherViewModel : ViewModel() {
                 }
             }
 
-            // 3. TCP 深度扫描（降级兜底）
             val tcpDeferred = async {
-                // 等待 5 秒，让 UDP/mDNS 先工作
                 delay(5000)
                 if (_devices.value.isEmpty()) {
                     withContext(Dispatchers.Main) {
@@ -527,7 +520,6 @@ class TetherViewModel : ViewModel() {
             _selectedDevice.value = if (newList.isNotEmpty()) newList.first() else null
         }
         _statusMessage.value = "已删除: ${device.ip}"
-        // 同时从 UDP 缓存删除
         synchronized(udpCache) {
             udpCache.remove(device.id)
         }
