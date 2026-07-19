@@ -1,6 +1,7 @@
 package com.tether.controller
 
 import android.content.Context
+import android.net.ConnectivityManager
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Log
@@ -16,6 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
 import java.net.Inet4Address
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.Socket
 
@@ -299,6 +301,7 @@ class TetherViewModel : ViewModel() {
         return found
     }
 
+    // ==================== TCP 深度扫描（绑定网络 + 完整异常日志） ====================
     private suspend fun performTcpDiscovery(foundDevices: MutableMap<String, DeviceInfo>) {
         val baseIp = getLocalIpBase()
         val total = 254
@@ -315,6 +318,16 @@ class TetherViewModel : ViewModel() {
             _statusMessage.value = "开始 TCP 扫描 $baseIp.*"
         }
 
+        // 获取 WiFi 网络
+        val connectivityManager = context?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val network = connectivityManager?.activeNetwork
+
+        if (network != null) {
+            Log.d("Tether", "绑定到网络: ${network.javaClass.simpleName}")
+        } else {
+            Log.d("Tether", "⚠️ 没有检测到活动网络")
+        }
+
         val batchSize = 5
         for (batchStart in 1..total step batchSize) {
             if (!_isScanning.value) {
@@ -328,42 +341,48 @@ class TetherViewModel : ViewModel() {
                 val ip = "$baseIp.$i"
                 val job = viewModelScope.launch {
                     try {
-                        Socket(ip, tcpPort).use { socket ->
-                            socket.soTimeout = tcpTimeout
-                            socket.tcpNoDelay = true
-                            val output = socket.getOutputStream()
-                            output.write("ping\n".toByteArray())
-                            output.flush()
+                        val socket = Socket()
+                        // 绑定到网络（MIUI 修复）
+                        if (network != null) {
+                            connectivityManager?.bindProcessToNetwork(network)
+                        }
+                        socket.connect(InetSocketAddress(ip, tcpPort), tcpTimeout)
+                        socket.soTimeout = tcpTimeout
+                        socket.tcpNoDelay = true
 
-                            val input = socket.getInputStream()
-                            val buffer = ByteArray(1024)
-                            val len = input.read(buffer)
-                            if (len > 0) {
-                                val response = String(buffer, 0, len)
-                                if (response.startsWith("pong")) {
-                                    foundCount++
-                                    val parts = response.split("|")
-                                    val deviceName = if (parts.size >= 2 && parts[1].isNotEmpty()) parts[1] else "PC"
-                                    val machineCode = if (parts.size >= 4) parts[3] else ""
-                                    val id = if (machineCode.isNotEmpty()) machineCode else "$deviceName|$ip"
-                                    val device = DeviceInfo(
-                                        id = id,
-                                        ip = ip,
-                                        name = deviceName,
-                                        isOnline = true,
-                                        machineCode = machineCode
-                                    )
-                                    synchronized(foundDevices) {
-                                        foundDevices[id] = device
-                                    }
-                                    Log.d("Tether", "✅ 发现设备: $ip ($deviceName)")
-                                    withContext(Dispatchers.Main) {
-                                        _statusMessage.value = "发现设备: $ip:$deviceName (TCP)"
-                                        _devices.value = foundDevices.values.map { it.copy(isOnline = true) }.toMutableList()
-                                    }
+                        val output = socket.getOutputStream()
+                        output.write("ping\n".toByteArray())
+                        output.flush()
+
+                        val input = socket.getInputStream()
+                        val buffer = ByteArray(1024)
+                        val len = input.read(buffer)
+                        if (len > 0) {
+                            val response = String(buffer, 0, len)
+                            if (response.startsWith("pong")) {
+                                foundCount++
+                                val parts = response.split("|")
+                                val deviceName = if (parts.size >= 2 && parts[1].isNotEmpty()) parts[1] else "PC"
+                                val machineCode = if (parts.size >= 4) parts[3] else ""
+                                val id = if (machineCode.isNotEmpty()) machineCode else "$deviceName|$ip"
+                                val device = DeviceInfo(
+                                    id = id,
+                                    ip = ip,
+                                    name = deviceName,
+                                    isOnline = true,
+                                    machineCode = machineCode
+                                )
+                                synchronized(foundDevices) {
+                                    foundDevices[id] = device
+                                }
+                                Log.d("Tether", "✅ 发现设备: $ip ($deviceName)")
+                                withContext(Dispatchers.Main) {
+                                    _statusMessage.value = "发现设备: $ip:$deviceName (TCP)"
+                                    _devices.value = foundDevices.values.map { it.copy(isOnline = true) }.toMutableList()
                                 }
                             }
                         }
+                        socket.close()
                     } catch (e: Exception) {
                         errorCount++
                         if (ip == "192.168.10.10") {
