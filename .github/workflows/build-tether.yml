@@ -14,7 +14,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-ubuntu-22.04
     continue-on-error: false
 
     steps:
