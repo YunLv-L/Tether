@@ -3,6 +3,7 @@ package com.tether.controller
 import android.content.ComponentName
 import android.content.Context
 import android.os.IBinder
+import android.os.Parcel
 import android.os.RemoteException
 import android.util.Log
 import rikka.shizuku.Shizuku
@@ -11,9 +12,13 @@ import rikka.shizuku.ShizukuProvider
 object ShizukuManager {
     private const val TAG = "ShizukuManager"
     private const val PERMISSION_REQUEST_CODE = 1000
+    private const val DESCRIPTOR = "com.tether.controller.IUserService"
+
+    private val TRANSACTION_executeCommand = 1
+    private val TRANSACTION_ping = 2
 
     private var isInitialized = false
-    private var userService: IUserService? = null
+    private var userServiceBinder: IBinder? = null
     private var userServiceConnected = false
 
     private var binderReceivedListener: Shizuku.OnBinderReceivedListener? = null
@@ -25,31 +30,43 @@ object ShizukuManager {
 
     private val userServiceArgs = Shizuku.UserServiceArgs(
         ComponentName(
-            BuildConfig.APPLICATION_ID,
+            "com.tether.controller",
             UserService::class.java.name
         )
     )
         .daemon(false)
         .processNameSuffix("user_service")
-        .debuggable(BuildConfig.DEBUG)
-        .version(BuildConfig.VERSION_CODE)
+        .debuggable(true)
+        .version(1)
 
     private val userServiceConnection = object : Shizuku.ServiceConnection {
         override fun onServiceConnected(componentName: ComponentName, iBinder: IBinder) {
             Log.d(TAG, "✅ UserService 已连接")
-            userService = IUserService.Stub.asInterface(iBinder)
+            userServiceBinder = iBinder
             userServiceConnected = true
-            try {
-                userService?.ping()
-            } catch (e: RemoteException) {
-                Log.e(TAG, "UserService ping 失败", e)
-            }
+            pingUserService()
         }
 
         override fun onServiceDisconnected(componentName: ComponentName) {
             Log.d(TAG, "❌ UserService 已断开")
-            userService = null
+            userServiceBinder = null
             userServiceConnected = false
+        }
+    }
+
+    private fun pingUserService() {
+        val binder = userServiceBinder ?: return
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            binder.transact(TRANSACTION_ping, data, reply, 0)
+            Log.d(TAG, "UserService ping 成功")
+        } catch (e: RemoteException) {
+            Log.e(TAG, "UserService ping 失败", e)
+        } finally {
+            data.recycle()
+            reply.recycle()
         }
     }
 
@@ -76,7 +93,7 @@ object ShizukuManager {
                 override fun onBinderDead() {
                     Log.d(TAG, "❌ Shizuku Binder 已断开")
                     binderDeadCallbacks.forEach { it.invoke() }
-                    userService = null
+                    userServiceBinder = null
                     userServiceConnected = false
                 }
             }
@@ -122,7 +139,7 @@ object ShizukuManager {
         binderDeadListener = null
         permissionResultListener = null
         isInitialized = false
-        userService = null
+        userServiceBinder = null
         userServiceConnected = false
         Log.d(TAG, "Shizuku 已销毁")
     }
@@ -153,7 +170,7 @@ object ShizukuManager {
         } catch (e: Exception) {
             Log.e(TAG, "解绑 UserService 失败", e)
         }
-        userService = null
+        userServiceBinder = null
         userServiceConnected = false
     }
 
@@ -177,7 +194,7 @@ object ShizukuManager {
         return isAvailable() && isGranted() && !Shizuku.isPreV11()
     }
 
-    fun isUserServiceReady(): Boolean = userServiceConnected && userService != null
+    fun isUserServiceReady(): Boolean = userServiceConnected && userServiceBinder != null
 
     fun requestPermission(onResult: ((Boolean) -> Unit)? = null) {
         if (Shizuku.isPreV11()) {
@@ -230,11 +247,21 @@ object ShizukuManager {
             }
         }
 
+        val binder = userServiceBinder ?: return ""
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
         return try {
-            userService?.executeCommand(command) ?: ""
+            data.writeInterfaceToken(DESCRIPTOR)
+            data.writeString(command)
+            binder.transact(TRANSACTION_executeCommand, data, reply, 0)
+            reply.readException()
+            reply.readString() ?: ""
         } catch (e: RemoteException) {
             Log.e(TAG, "执行命令失败", e)
             ""
+        } finally {
+            data.recycle()
+            reply.recycle()
         }
     }
 

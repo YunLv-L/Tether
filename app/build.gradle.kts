@@ -20,19 +20,6 @@ android {
         }
     }
 
-    // ✅ 强制指定 AIDL 源集
-    sourceSets {
-        getByName("main") {
-            aidl.srcDirs("src/main/aidl")
-            java.srcDirs("src/main/java")
-        }
-    }
-
-    // ✅ 强制 AIDL 编译
-    aaptOptions {
-        noCompress("aidl")
-    }
-
     buildFeatures {
         compose = true
     }
