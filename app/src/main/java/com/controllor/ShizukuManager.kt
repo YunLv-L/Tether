@@ -23,7 +23,6 @@ object ShizukuManager {
 
     private var binderReceivedListener: Shizuku.OnBinderReceivedListener? = null
     private var binderDeadListener: Shizuku.OnBinderDeadListener? = null
-    private var permissionResultListener: Shizuku.OnPermissionResultListener? = null
 
     private val binderReceivedCallbacks = mutableListOf<() -> Unit>()
     private val binderDeadCallbacks = mutableListOf<() -> Unit>()
@@ -101,19 +100,6 @@ object ShizukuManager {
             Shizuku.addBinderReceivedListener(binderReceivedListener)
             Shizuku.addBinderDeadListener(binderDeadListener)
 
-            permissionResultListener = object : Shizuku.OnPermissionResultListener {
-                override fun onPermissionResult(requestCode: Int, grantResult: Int) {
-                    if (requestCode == PERMISSION_REQUEST_CODE) {
-                        val granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED
-                        Log.d(TAG, if (granted) "✅ Shizuku 权限已授予" else "❌ Shizuku 权限被拒绝")
-                        if (granted) {
-                            bindUserService()
-                        }
-                    }
-                }
-            }
-            Shizuku.addPermissionResultListener(permissionResultListener)
-
             isInitialized = true
             Log.d(TAG, "✅ Shizuku 初始化完成")
 
@@ -132,12 +118,10 @@ object ShizukuManager {
         unbindUserService()
         try { binderReceivedListener?.let { Shizuku.removeBinderReceivedListener(it) } } catch (e: Exception) { /* ignore */ }
         try { binderDeadListener?.let { Shizuku.removeBinderDeadListener(it) } } catch (e: Exception) { /* ignore */ }
-        try { permissionResultListener?.let { Shizuku.removePermissionResultListener(it) } } catch (e: Exception) { /* ignore */ }
         binderReceivedCallbacks.clear()
         binderDeadCallbacks.clear()
         binderReceivedListener = null
         binderDeadListener = null
-        permissionResultListener = null
         isInitialized = false
         userServiceBinder = null
         userServiceConnected = false
@@ -213,25 +197,23 @@ object ShizukuManager {
             return
         }
 
-        val listener = object : Shizuku.OnPermissionResultListener {
-            override fun onPermissionResult(requestCode: Int, grantResult: Int) {
-                if (requestCode == PERMISSION_REQUEST_CODE) {
-                    val granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED
-                    onResult?.invoke(granted)
-                    try { Shizuku.removePermissionResultListener(this) } catch (e: Exception) { /* ignore */ }
-                    if (granted) {
-                        bindUserService()
-                    }
+        // 使用 Shizuku 自带的权限请求监听器
+        val listener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+            if (requestCode == PERMISSION_REQUEST_CODE) {
+                val granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED
+                onResult?.invoke(granted)
+                if (granted) {
+                    bindUserService()
                 }
             }
         }
 
         try {
-            Shizuku.addPermissionResultListener(listener)
+            Shizuku.addRequestPermissionResultListener(listener)
             Shizuku.requestPermission(PERMISSION_REQUEST_CODE)
         } catch (e: Exception) {
             Log.e(TAG, "❌ 请求权限异常", e)
-            try { Shizuku.removePermissionResultListener(listener) } catch (ex: Exception) { /* ignore */ }
+            try { Shizuku.removeRequestPermissionResultListener(listener) } catch (ex: Exception) { /* ignore */ }
             onResult?.invoke(false)
         }
     }

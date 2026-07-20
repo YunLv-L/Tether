@@ -1,13 +1,13 @@
 package com.tether.controller
 
-import android.os.IBinder
+import android.os.Binder
 import android.os.Parcel
 import android.os.RemoteException
 import android.util.Log
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
-class UserService : IBinder() {
+class UserService : Binder() {
 
     companion object {
         private const val TAG = "UserService"
