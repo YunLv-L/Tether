@@ -33,8 +33,8 @@ public class ShizukuManager {
         }
 
         try {
-            // ✅ 无参调用（Shizuku 13.1.5 兼容）
-            ShizukuProvider.enableMultiProcessSupport();
+            // ✅ 修复1：传入 true 参数
+            ShizukuProvider.enableMultiProcessSupport(true);
 
             binderReceivedListener = () -> {
                 Log.d(TAG, "✅ Shizuku Binder 已连接");
@@ -99,8 +99,8 @@ public class ShizukuManager {
                 Log.w(TAG, "Binder 为空");
                 return;
             }
-            ShizukuBinderWrapper wrapper = new ShizukuBinderWrapper(binder);
-            shellServiceBinder = SystemServiceHelper.getSystemService(wrapper, "shell");
+            // ✅ 修复2：SystemServiceHelper 只接受 String 参数
+            shellServiceBinder = SystemServiceHelper.getSystemService("shell");
             if (shellServiceBinder != null) {
                 Log.d(TAG, "✅ Shell 服务已获取");
             } else {
@@ -140,11 +140,12 @@ public class ShizukuManager {
             return;
         }
 
+        // ✅ 修复3：用 listener 变量名代替 this
         Shizuku.OnRequestPermissionResultListener listener = (requestCode, grantResult) -> {
             if (requestCode == PERMISSION_REQUEST_CODE) {
                 boolean granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED;
                 if (callback != null) callback.onResult(granted);
-                try { Shizuku.removeRequestPermissionResultListener(this); } catch (Exception ignored) {}
+                try { Shizuku.removeRequestPermissionResultListener(listener); } catch (Exception ignored) {}
                 if (granted) {
                     initShellService();
                 }
@@ -173,7 +174,6 @@ public class ShizukuManager {
         }
 
         try {
-            // ✅ 通过反射调用 execCommand
             Method method = shellServiceBinder.getClass().getDeclaredMethod(
                     "execCommand",
                     String.class,
@@ -189,7 +189,7 @@ public class ShizukuManager {
             Log.e(TAG, "执行命令失败", e);
         }
 
-        // ✅ 降级方案：用 Runtime.exec（无 Shizuku 权限，但保底）
+        // 降级方案
         try {
             Process process = Runtime.getRuntime().exec(new String[]{"sh", "-c", command});
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
@@ -222,7 +222,6 @@ public class ShizukuManager {
         return executeCommand("echo 'ping' | timeout 2 bash -c \"cat >/dev/tcp/" + ip + "/" + port + "\" 2>/dev/null && echo done");
     }
 
-    // ==================== 回调接口 ====================
     public interface OnResultCallback {
         void onResult(boolean granted);
     }
