@@ -2,7 +2,6 @@ package com.tether.controller
 
 import android.os.Binder
 import android.os.Parcel
-import android.os.RemoteException
 import android.util.Log
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -12,8 +11,6 @@ class UserService : Binder() {
     companion object {
         private const val TAG = "UserService"
         private const val DESCRIPTOR = "com.tether.controller.IUserService"
-
-        // Transaction codes
         private const val TRANSACTION_executeCommand = 1
         private const val TRANSACTION_ping = 2
     }
@@ -62,10 +59,4 @@ class UserService : Binder() {
     private fun ping() {
         Log.d(TAG, "UserService ping 成功")
     }
-
-    override fun getInterfaceDescriptor(): String = DESCRIPTOR
-
-    override fun pingBinder(): Boolean = true
-
-    override fun isBinderAlive(): Boolean = true
 }

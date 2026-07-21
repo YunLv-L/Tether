@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 初始化 Shizuku
+        // ✅ 初始化 Shizuku（Java 版）
         ShizukuManager.init(applicationContext)
 
         setContent {
@@ -342,7 +342,11 @@ fun TetherApp(
             OutlinedButton(
                 onClick = {
                     if (!ShizukuManager.canUseHighPrivilege()) {
-                        ShizukuManager.requestPermission()
+                        ShizukuManager.requestPermission { granted ->
+                            if (granted) {
+                                viewModel.shizukuScan()
+                            }
+                        }
                         return@OutlinedButton
                     }
                     viewModel.shizukuScan()
