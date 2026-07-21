@@ -138,13 +138,13 @@ public class ShizukuManager {
             return;
         }
 
-        // ✅ listener 直接初始化，不用 null
-        Shizuku.OnRequestPermissionResultListener listener = (requestCode, grantResult) -> {
+        // ✅ 用数组包装，绕过"可能未初始化"检查
+        final Shizuku.OnRequestPermissionResultListener[] listenerHolder = new Shizuku.OnRequestPermissionResultListener[1];
+        listenerHolder[0] = (requestCode, grantResult) -> {
             if (requestCode == PERMISSION_REQUEST_CODE) {
                 boolean granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED;
                 if (callback != null) callback.onResult(granted);
-                // ✅ 用 listener 变量名移除自身
-                try { Shizuku.removeRequestPermissionResultListener(listener); } catch (Exception ignored) {}
+                try { Shizuku.removeRequestPermissionResultListener(listenerHolder[0]); } catch (Exception ignored) {}
                 if (granted) {
                     initShellService();
                 }
@@ -152,11 +152,11 @@ public class ShizukuManager {
         };
 
         try {
-            Shizuku.addRequestPermissionResultListener(listener);
+            Shizuku.addRequestPermissionResultListener(listenerHolder[0]);
             Shizuku.requestPermission(PERMISSION_REQUEST_CODE);
         } catch (Exception e) {
             Log.e(TAG, "❌ 请求权限异常", e);
-            try { Shizuku.removeRequestPermissionResultListener(listener); } catch (Exception ignored) {}
+            try { Shizuku.removeRequestPermissionResultListener(listenerHolder[0]); } catch (Exception ignored) {}
             if (callback != null) callback.onResult(false);
         }
     }
@@ -173,7 +173,6 @@ public class ShizukuManager {
         }
 
         try {
-            // 通过反射调用 execCommand
             Method method = shellServiceBinder.getClass().getDeclaredMethod(
                     "execCommand",
                     String.class,
@@ -189,7 +188,7 @@ public class ShizukuManager {
             Log.e(TAG, "执行命令失败", e);
         }
 
-        // 降级方案：用 Runtime.exec
+        // 降级方案
         try {
             Process process = Runtime.getRuntime().exec(new String[]{"sh", "-c", command});
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
@@ -222,7 +221,6 @@ public class ShizukuManager {
         return executeCommand("echo 'ping' | timeout 2 bash -c \"cat >/dev/tcp/" + ip + "/" + port + "\" 2>/dev/null && echo done");
     }
 
-    // ==================== 回调接口 ====================
     public interface OnResultCallback {
         void onResult(boolean granted);
     }
