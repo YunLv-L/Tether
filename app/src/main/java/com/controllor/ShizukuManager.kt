@@ -38,6 +38,7 @@ object ShizukuManager {
         .debuggable(true)
         .version(1)
 
+    // ✅ 使用 rikka.shizuku.Shizuku.ServiceConnection
     private val userServiceConnection = object : Shizuku.ServiceConnection {
         override fun onServiceConnected(componentName: ComponentName, iBinder: IBinder) {
             Log.d(TAG, "✅ UserService 已连接")
@@ -79,6 +80,7 @@ object ShizukuManager {
         try {
             ShizukuProvider.enableMultiProcessSupport()
 
+            // ✅ 使用 object : Shizuku.OnBinderReceivedListener
             binderReceivedListener = object : Shizuku.OnBinderReceivedListener {
                 override fun onBinderReceived() {
                     Log.d(TAG, "✅ Shizuku Binder 已连接")
@@ -197,13 +199,15 @@ object ShizukuManager {
             return
         }
 
-        // 使用 Shizuku 自带的权限请求监听器
-        val listener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
-            if (requestCode == PERMISSION_REQUEST_CODE) {
-                val granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED
-                onResult?.invoke(granted)
-                if (granted) {
-                    bindUserService()
+        // ✅ 使用 Shizuku.OnRequestPermissionResultListener
+        val listener = object : Shizuku.OnRequestPermissionResultListener {
+            override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
+                if (requestCode == PERMISSION_REQUEST_CODE) {
+                    val granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    onResult?.invoke(granted)
+                    if (granted) {
+                        bindUserService()
+                    }
                 }
             }
         }
