@@ -1,71 +1,31 @@
 package com.tether.controller;
 
-import android.content.ComponentName;
 import android.content.Context;
 import android.os.IBinder;
-import android.os.Parcel;
 import android.os.RemoteException;
 import android.util.Log;
 
 import rikka.shizuku.Shizuku;
+import rikka.shizuku.ShizukuBinderWrapper;
 import rikka.shizuku.ShizukuProvider;
+import rikka.shizuku.SystemServiceHelper;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.lang.reflect.Method;
 
 public class ShizukuManager {
     private static final String TAG = "ShizukuManager";
     private static final int PERMISSION_REQUEST_CODE = 1000;
-    private static final String DESCRIPTOR = "com.tether.controller.IUserService";
-    private static final int TRANSACTION_executeCommand = 1;
-    private static final int TRANSACTION_ping = 2;
 
     private static boolean isInitialized = false;
-    private static IBinder userServiceBinder = null;
-    private static boolean userServiceConnected = false;
-
     private static Shizuku.OnBinderReceivedListener binderReceivedListener = null;
     private static Shizuku.OnBinderDeadListener binderDeadListener = null;
     private static Shizuku.OnRequestPermissionResultListener requestPermissionResultListener = null;
 
-    // ✅ 正确：使用 Shizuku.ServiceConnection
-    private static final Shizuku.ServiceConnection userServiceConnection = new Shizuku.ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName componentName, IBinder iBinder) {
-            Log.d(TAG, "✅ UserService 已连接");
-            userServiceBinder = iBinder;
-            userServiceConnected = true;
-            pingUserService();
-        }
+    private static IBinder shellServiceBinder = null;
 
-        @Override
-        public void onServiceDisconnected(ComponentName componentName) {
-            Log.d(TAG, "❌ UserService 已断开");
-            userServiceBinder = null;
-            userServiceConnected = false;
-        }
-    };
-
-    private static final Shizuku.UserServiceArgs userServiceArgs =
-            new Shizuku.UserServiceArgs(new ComponentName("com.tether.controller", "com.tether.controller.UserService"))
-                    .daemon(false)
-                    .processNameSuffix("user_service")
-                    .debuggable(true)
-                    .version(1);
-
-    private static void pingUserService() {
-        if (userServiceBinder == null) return;
-        Parcel data = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(DESCRIPTOR);
-            userServiceBinder.transact(TRANSACTION_ping, data, reply, 0);
-            Log.d(TAG, "UserService ping 成功");
-        } catch (RemoteException e) {
-            Log.e(TAG, "UserService ping 失败", e);
-        } finally {
-            data.recycle();
-            reply.recycle();
-        }
-    }
-
+    // ==================== 初始化 ====================
     public static void init(Context context) {
         if (isInitialized) {
             Log.d(TAG, "Shizuku 已初始化，跳过");
@@ -73,20 +33,17 @@ public class ShizukuManager {
         }
 
         try {
-            // ✅ 正确：传入 true 参数
-            ShizukuProvider.enableMultiProcessSupport(true);
+            // ✅ 无参调用（Shizuku 13.1.5 兼容）
+            ShizukuProvider.enableMultiProcessSupport();
 
             binderReceivedListener = () -> {
                 Log.d(TAG, "✅ Shizuku Binder 已连接");
-                if (!userServiceConnected) {
-                    bindUserService();
-                }
+                initShellService();
             };
 
             binderDeadListener = () -> {
                 Log.d(TAG, "❌ Shizuku Binder 已断开");
-                userServiceBinder = null;
-                userServiceConnected = false;
+                shellServiceBinder = null;
             };
 
             requestPermissionResultListener = (requestCode, grantResult) -> {
@@ -94,7 +51,7 @@ public class ShizukuManager {
                     boolean granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED;
                     Log.d(TAG, granted ? "✅ Shizuku 权限已授予" : "❌ Shizuku 权限被拒绝");
                     if (granted) {
-                        bindUserService();
+                        initShellService();
                     }
                 }
             };
@@ -107,7 +64,7 @@ public class ShizukuManager {
             Log.d(TAG, "✅ Shizuku 初始化完成");
 
             if (canUseHighPrivilege()) {
-                bindUserService();
+                initShellService();
             }
         } catch (Exception e) {
             Log.e(TAG, "❌ Shizuku 初始化失败", e);
@@ -117,8 +74,6 @@ public class ShizukuManager {
     }
 
     public static void destroy() {
-        unbindUserService();
-
         if (binderReceivedListener != null) {
             try { Shizuku.removeBinderReceivedListener(binderReceivedListener); } catch (Exception ignored) {}
         }
@@ -128,16 +83,35 @@ public class ShizukuManager {
         if (requestPermissionResultListener != null) {
             try { Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener); } catch (Exception ignored) {}
         }
-
         binderReceivedListener = null;
         binderDeadListener = null;
         requestPermissionResultListener = null;
+        shellServiceBinder = null;
         isInitialized = false;
-        userServiceBinder = null;
-        userServiceConnected = false;
         Log.d(TAG, "Shizuku 已销毁");
     }
 
+    // ==================== 初始化 Shell 服务 ====================
+    private static void initShellService() {
+        try {
+            IBinder binder = Shizuku.getBinder();
+            if (binder == null) {
+                Log.w(TAG, "Binder 为空");
+                return;
+            }
+            ShizukuBinderWrapper wrapper = new ShizukuBinderWrapper(binder);
+            shellServiceBinder = SystemServiceHelper.getSystemService(wrapper, "shell");
+            if (shellServiceBinder != null) {
+                Log.d(TAG, "✅ Shell 服务已获取");
+            } else {
+                Log.w(TAG, "⚠️ Shell 服务为空");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "获取 Shell 服务失败", e);
+        }
+    }
+
+    // ==================== 状态检查 ====================
     public static boolean isAvailable() {
         try { return Shizuku.pingBinder(); } catch (Exception e) { return false; }
     }
@@ -150,11 +124,11 @@ public class ShizukuManager {
         return isAvailable() && isGranted() && !Shizuku.isPreV11();
     }
 
-    public static boolean isUserServiceReady() {
-        return userServiceConnected && userServiceBinder != null;
+    public static boolean isShellServiceReady() {
+        return shellServiceBinder != null;
     }
 
-    // ✅ 权限请求方法中的 this 引用是安全的
+    // ==================== 权限请求 ====================
     public static void requestPermission(OnResultCallback callback) {
         if (Shizuku.isPreV11() || !isAvailable()) {
             if (callback != null) callback.onResult(false);
@@ -162,7 +136,7 @@ public class ShizukuManager {
         }
         if (isGranted()) {
             if (callback != null) callback.onResult(true);
-            bindUserService();
+            initShellService();
             return;
         }
 
@@ -172,7 +146,7 @@ public class ShizukuManager {
                 if (callback != null) callback.onResult(granted);
                 try { Shizuku.removeRequestPermissionResultListener(this); } catch (Exception ignored) {}
                 if (granted) {
-                    bindUserService();
+                    initShellService();
                 }
             }
         };
@@ -187,68 +161,53 @@ public class ShizukuManager {
         }
     }
 
-    // ... 其他方法 (executeCommand, pingHost, checkPort, tcpProbe) 保持不变 ...
-    // 请确保它们与上文提供的完整代码一致
-
-    private static void bindUserService() {
-        if (userServiceConnected) {
-            Log.d(TAG, "UserService 已连接，跳过绑定");
-            return;
-        }
-        if (!canUseHighPrivilege()) {
-            Log.w(TAG, "Shizuku 不可用，无法绑定 UserService");
-            return;
-        }
-
-        try {
-            Shizuku.bindUserService(userServiceArgs, userServiceConnection);
-            Log.d(TAG, "📨 UserService 绑定请求已发送");
-        } catch (Exception e) {
-            Log.e(TAG, "❌ 绑定 UserService 失败", e);
-        }
-    }
-
-    private static void unbindUserService() {
-        if (!userServiceConnected) return;
-        try {
-            Shizuku.unbindUserService(userServiceArgs, userServiceConnection, true);
-            Log.d(TAG, "UserService 已解绑");
-        } catch (Exception e) {
-            Log.e(TAG, "解绑 UserService 失败", e);
-        }
-        userServiceBinder = null;
-        userServiceConnected = false;
-    }
-
+    // ==================== 执行命令 ====================
     public static String executeCommand(String command) {
-        if (!isUserServiceReady()) {
-            Log.w(TAG, "UserService 未就绪，尝试重新绑定");
-            bindUserService();
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-            if (!isUserServiceReady()) {
-                Log.e(TAG, "UserService 不可用");
+        if (!isShellServiceReady()) {
+            Log.w(TAG, "Shell 服务未就绪，尝试重新获取");
+            initShellService();
+            if (!isShellServiceReady()) {
+                Log.e(TAG, "Shell 服务不可用");
                 return "";
             }
         }
 
-        if (userServiceBinder == null) return "";
-        Parcel data = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
         try {
-            data.writeInterfaceToken(DESCRIPTOR);
-            data.writeString(command);
-            userServiceBinder.transact(TRANSACTION_executeCommand, data, reply, 0);
-            reply.readException();
-            return reply.readString();
-        } catch (RemoteException e) {
+            // ✅ 通过反射调用 execCommand
+            Method method = shellServiceBinder.getClass().getDeclaredMethod(
+                    "execCommand",
+                    String.class,
+                    String[].class,
+                    String.class
+            );
+            method.setAccessible(true);
+            Object[] result = (Object[]) method.invoke(shellServiceBinder, command, new String[0], null);
+            if (result != null && result.length > 0) {
+                return result[0] != null ? result[0].toString() : "";
+            }
+        } catch (Exception e) {
             Log.e(TAG, "执行命令失败", e);
+        }
+
+        // ✅ 降级方案：用 Runtime.exec（无 Shizuku 权限，但保底）
+        try {
+            Process process = Runtime.getRuntime().exec(new String[]{"sh", "-c", command});
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            StringBuilder output = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line).append("\n");
+            }
+            process.waitFor();
+            reader.close();
+            return output.toString().trim();
+        } catch (Exception e) {
+            Log.e(TAG, "降级执行失败", e);
             return "";
-        } finally {
-            data.recycle();
-            reply.recycle();
         }
     }
 
+    // ==================== 快捷方法 ====================
     public static boolean pingHost(String ip) {
         String result = executeCommand("ping -c 1 -W 1 " + ip + " 2>/dev/null && echo alive");
         return result.contains("alive") || result.contains("1 received");
@@ -263,6 +222,7 @@ public class ShizukuManager {
         return executeCommand("echo 'ping' | timeout 2 bash -c \"cat >/dev/tcp/" + ip + "/" + port + "\" 2>/dev/null && echo done");
     }
 
+    // ==================== 回调接口 ====================
     public interface OnResultCallback {
         void onResult(boolean granted);
     }
