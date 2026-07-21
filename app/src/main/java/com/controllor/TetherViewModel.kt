@@ -376,7 +376,7 @@ class TetherViewModel : ViewModel() {
                     if (!_isScanning.value) break
                     val ip = "$baseIp.$i"
 
-                    if (ShizukuManager.pingHost(ip, 1)) {
+                    if (ShizukuManager.pingHost(ip)) {
                         if (ShizukuManager.checkPort(ip, tcpPort)) {
                             val deviceInfo = shizukuGetDeviceInfo(ip)
                             if (deviceInfo != null) {
