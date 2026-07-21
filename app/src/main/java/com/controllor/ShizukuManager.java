@@ -25,7 +25,7 @@ public class ShizukuManager {
     private static Shizuku.OnBinderDeadListener binderDeadListener = null;
     private static Shizuku.OnRequestPermissionResultListener requestPermissionResultListener = null;
 
-    // ServiceConnection（官方示例标准写法）
+    // ✅ 正确：使用 Shizuku.ServiceConnection
     private static final Shizuku.ServiceConnection userServiceConnection = new Shizuku.ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName componentName, IBinder iBinder) {
@@ -50,7 +50,22 @@ public class ShizukuManager {
                     .debuggable(true)
                     .version(1);
 
-    // ==================== 初始化 ====================
+    private static void pingUserService() {
+        if (userServiceBinder == null) return;
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(DESCRIPTOR);
+            userServiceBinder.transact(TRANSACTION_ping, data, reply, 0);
+            Log.d(TAG, "UserService ping 成功");
+        } catch (RemoteException e) {
+            Log.e(TAG, "UserService ping 失败", e);
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
     public static void init(Context context) {
         if (isInitialized) {
             Log.d(TAG, "Shizuku 已初始化，跳过");
@@ -58,7 +73,8 @@ public class ShizukuManager {
         }
 
         try {
-            ShizukuProvider.enableMultiProcessSupport();
+            // ✅ 正确：传入 true 参数
+            ShizukuProvider.enableMultiProcessSupport(true);
 
             binderReceivedListener = () -> {
                 Log.d(TAG, "✅ Shizuku Binder 已连接");
@@ -122,7 +138,6 @@ public class ShizukuManager {
         Log.d(TAG, "Shizuku 已销毁");
     }
 
-    // ==================== 状态检查 ====================
     public static boolean isAvailable() {
         try { return Shizuku.pingBinder(); } catch (Exception e) { return false; }
     }
@@ -139,7 +154,7 @@ public class ShizukuManager {
         return userServiceConnected && userServiceBinder != null;
     }
 
-    // ==================== 权限请求 ====================
+    // ✅ 权限请求方法中的 this 引用是安全的
     public static void requestPermission(OnResultCallback callback) {
         if (Shizuku.isPreV11() || !isAvailable()) {
             if (callback != null) callback.onResult(false);
@@ -172,7 +187,9 @@ public class ShizukuManager {
         }
     }
 
-    // ==================== UserService 绑定 ====================
+    // ... 其他方法 (executeCommand, pingHost, checkPort, tcpProbe) 保持不变 ...
+    // 请确保它们与上文提供的完整代码一致
+
     private static void bindUserService() {
         if (userServiceConnected) {
             Log.d(TAG, "UserService 已连接，跳过绑定");
@@ -203,7 +220,6 @@ public class ShizukuManager {
         userServiceConnected = false;
     }
 
-    // ==================== 执行命令 ====================
     public static String executeCommand(String command) {
         if (!isUserServiceReady()) {
             Log.w(TAG, "UserService 未就绪，尝试重新绑定");
@@ -233,23 +249,6 @@ public class ShizukuManager {
         }
     }
 
-    private static void pingUserService() {
-        if (userServiceBinder == null) return;
-        Parcel data = Parcel.obtain();
-        Parcel reply = Parcel.obtain();
-        try {
-            data.writeInterfaceToken(DESCRIPTOR);
-            userServiceBinder.transact(TRANSACTION_ping, data, reply, 0);
-            Log.d(TAG, "UserService ping 成功");
-        } catch (RemoteException e) {
-            Log.e(TAG, "UserService ping 失败", e);
-        } finally {
-            data.recycle();
-            reply.recycle();
-        }
-    }
-
-    // ==================== 快捷方法 ====================
     public static boolean pingHost(String ip) {
         String result = executeCommand("ping -c 1 -W 1 " + ip + " 2>/dev/null && echo alive");
         return result.contains("alive") || result.contains("1 received");
@@ -264,7 +263,6 @@ public class ShizukuManager {
         return executeCommand("echo 'ping' | timeout 2 bash -c \"cat >/dev/tcp/" + ip + "/" + port + "\" 2>/dev/null && echo done");
     }
 
-    // ==================== 回调接口 ====================
     public interface OnResultCallback {
         void onResult(boolean granted);
     }
