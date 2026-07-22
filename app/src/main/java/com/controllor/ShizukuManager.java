@@ -1,12 +1,13 @@
 package com.tether.controller;
 
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.os.Handler;
 import android.os.IBinder;
-import android.os.RemoteException;
+import android.os.Looper;
 import android.util.Log;
 
 import rikka.shizuku.Shizuku;
-import rikka.shizuku.ShizukuBinderWrapper;
 import rikka.shizuku.ShizukuProvider;
 import rikka.shizuku.SystemServiceHelper;
 
@@ -19,14 +20,21 @@ public class ShizukuManager {
     private static final int PERMISSION_REQUEST_CODE = 1000;
 
     private static boolean isInitialized = false;
+    private static Context appContext;
+
     private static Shizuku.OnBinderReceivedListener binderReceivedListener = null;
     private static Shizuku.OnBinderDeadListener binderDeadListener = null;
     private static Shizuku.OnRequestPermissionResultListener requestPermissionResultListener = null;
 
     private static IBinder shellServiceBinder = null;
+    private static int shellRetryCount = 0;
+    private static final int MAX_SHELL_RETRIES = 5;
+    private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // ==================== 初始化 ====================
     public static void init(Context context) {
+        appContext = context.getApplicationContext();
+
         if (isInitialized) {
             Log.d(TAG, "Shizuku 已初始化，跳过");
             return;
@@ -37,20 +45,22 @@ public class ShizukuManager {
 
             binderReceivedListener = () -> {
                 Log.d(TAG, "✅ Shizuku Binder 已连接");
-                initShellService();
+                initShellServiceWithRetry();
             };
 
             binderDeadListener = () -> {
                 Log.d(TAG, "❌ Shizuku Binder 已断开");
                 shellServiceBinder = null;
+                shellRetryCount = 0;
             };
 
             requestPermissionResultListener = (requestCode, grantResult) -> {
                 if (requestCode == PERMISSION_REQUEST_CODE) {
-                    boolean granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED;
+                    boolean granted = grantResult == PackageManager.PERMISSION_GRANTED;
                     Log.d(TAG, granted ? "✅ Shizuku 权限已授予" : "❌ Shizuku 权限被拒绝");
                     if (granted) {
-                        initShellService();
+                        shellRetryCount = 0;
+                        mainHandler.postDelayed(() -> initShellServiceWithRetry(), 500);
                     }
                 }
             };
@@ -63,7 +73,7 @@ public class ShizukuManager {
             Log.d(TAG, "✅ Shizuku 初始化完成");
 
             if (canUseHighPrivilege()) {
-                initShellService();
+                initShellServiceWithRetry();
             }
         } catch (Exception e) {
             Log.e(TAG, "❌ Shizuku 初始化失败", e);
@@ -86,90 +96,65 @@ public class ShizukuManager {
         binderDeadListener = null;
         requestPermissionResultListener = null;
         shellServiceBinder = null;
+        shellRetryCount = 0;
         isInitialized = false;
         Log.d(TAG, "Shizuku 已销毁");
     }
 
-    // ==================== 初始化 Shell 服务 ====================
-    private static void initShellService() {
+    // ==================== 获取 Shell 服务（带重试） ====================
+    private static void initShellServiceWithRetry() {
+        if (shellRetryCount >= MAX_SHELL_RETRIES) {
+            Log.e(TAG, "❌ Shell 服务获取失败，已达最大重试次数");
+            return;
+        }
+
+        shellRetryCount++;
+        Log.d(TAG, "🔄 尝试获取 Shell 服务 (" + shellRetryCount + "/" + MAX_SHELL_RETRIES + ")");
+
         try {
             IBinder binder = Shizuku.getBinder();
             if (binder == null) {
-                Log.w(TAG, "Binder 为空");
+                Log.w(TAG, "Binder 为空，延迟重试...");
+                mainHandler.postDelayed(() -> initShellServiceWithRetry(), 500);
                 return;
             }
+
             shellServiceBinder = SystemServiceHelper.getSystemService("shell");
             if (shellServiceBinder != null) {
                 Log.d(TAG, "✅ Shell 服务已获取");
-            } else {
-                Log.w(TAG, "⚠️ Shell 服务为空");
+                shellRetryCount = 0;
+                return;
             }
-        } catch (Exception e) {
-            Log.e(TAG, "获取 Shell 服务失败", e);
-        }
-    }
 
-    // ==================== 状态检查 ====================
-    public static boolean isAvailable() {
-        try { return Shizuku.pingBinder(); } catch (Exception e) { return false; }
-    }
-
-    public static boolean isGranted() {
-        try { return Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED; } catch (Exception e) { return false; }
-    }
-
-    public static boolean canUseHighPrivilege() {
-        return isAvailable() && isGranted() && !Shizuku.isPreV11();
-    }
-
-    public static boolean isShellServiceReady() {
-        return shellServiceBinder != null;
-    }
-
-    // ==================== 权限请求 ====================
-    public static void requestPermission(OnResultCallback callback) {
-        if (Shizuku.isPreV11() || !isAvailable()) {
-            if (callback != null) callback.onResult(false);
-            return;
-        }
-        if (isGranted()) {
-            if (callback != null) callback.onResult(true);
-            initShellService();
-            return;
-        }
-
-        // ✅ 用数组包装，绕过"可能未初始化"检查
-        final Shizuku.OnRequestPermissionResultListener[] listenerHolder = new Shizuku.OnRequestPermissionResultListener[1];
-        listenerHolder[0] = (requestCode, grantResult) -> {
-            if (requestCode == PERMISSION_REQUEST_CODE) {
-                boolean granted = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED;
-                if (callback != null) callback.onResult(granted);
-                try { Shizuku.removeRequestPermissionResultListener(listenerHolder[0]); } catch (Exception ignored) {}
-                if (granted) {
-                    initShellService();
+            // 反射尝试
+            try {
+                Method getServiceMethod = binder.getClass().getMethod("getService", String.class);
+                getServiceMethod.setAccessible(true);
+                IBinder shellBinder = (IBinder) getServiceMethod.invoke(binder, "shell");
+                if (shellBinder != null) {
+                    shellServiceBinder = shellBinder;
+                    Log.d(TAG, "✅ Shell 服务已获取 (通过反射)");
+                    shellRetryCount = 0;
+                    return;
                 }
+            } catch (Exception e) {
+                Log.d(TAG, "反射获取 Shell 服务失败: " + e.getMessage());
             }
-        };
 
-        try {
-            Shizuku.addRequestPermissionResultListener(listenerHolder[0]);
-            Shizuku.requestPermission(PERMISSION_REQUEST_CODE);
+            Log.w(TAG, "⚠️ Shell 服务获取失败，延迟重试...");
+            mainHandler.postDelayed(() -> initShellServiceWithRetry(), 500);
+
         } catch (Exception e) {
-            Log.e(TAG, "❌ 请求权限异常", e);
-            try { Shizuku.removeRequestPermissionResultListener(listenerHolder[0]); } catch (Exception ignored) {}
-            if (callback != null) callback.onResult(false);
+            Log.e(TAG, "获取 Shell 服务异常", e);
+            mainHandler.postDelayed(() -> initShellServiceWithRetry(), 500);
         }
     }
 
-    // ==================== 执行命令 ====================
+    // ==================== 执行命令（仅 Shizuku） ====================
     public static String executeCommand(String command) {
         if (!isShellServiceReady()) {
-            Log.w(TAG, "Shell 服务未就绪，尝试重新获取");
-            initShellService();
-            if (!isShellServiceReady()) {
-                Log.e(TAG, "Shell 服务不可用");
-                return "";
-            }
+            Log.w(TAG, "Shell 服务未就绪");
+            return "";
         }
 
         try {
@@ -185,24 +170,67 @@ public class ShizukuManager {
                 return result[0] != null ? result[0].toString() : "";
             }
         } catch (Exception e) {
-            Log.e(TAG, "执行命令失败", e);
+            Log.e(TAG, "Shizuku 执行失败", e);
+        }
+        return "";
+    }
+
+    // ==================== 状态检查 ====================
+    public static boolean isAvailable() {
+        try { return Shizuku.pingBinder(); } catch (Exception e) { return false; }
+    }
+
+    public static boolean isGranted() {
+        try { return Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED; } catch (Exception e) { return false; }
+    }
+
+    public static boolean canUseHighPrivilege() {
+        return isAvailable() && isGranted() && !Shizuku.isPreV11();
+    }
+
+    public static boolean isShellServiceReady() {
+        return shellServiceBinder != null;
+    }
+
+    public static String getStatus() {
+        return "Shizuku: " + (isAvailable() ? "✅" : "❌") +
+                " | 权限: " + (isGranted() ? "✅" : "❌") +
+                " | Shell: " + (isShellServiceReady() ? "✅" : "❌");
+    }
+
+    // ==================== 权限请求 ====================
+    public static void requestPermission(OnResultCallback callback) {
+        if (Shizuku.isPreV11() || !isAvailable()) {
+            if (callback != null) callback.onResult(false);
+            return;
+        }
+        if (isGranted()) {
+            if (callback != null) callback.onResult(true);
+            shellRetryCount = 0;
+            mainHandler.postDelayed(() -> initShellServiceWithRetry(), 300);
+            return;
         }
 
-        // 降级方案
-        try {
-            Process process = Runtime.getRuntime().exec(new String[]{"sh", "-c", command});
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            StringBuilder output = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append("\n");
+        final Shizuku.OnRequestPermissionResultListener[] listenerHolder = new Shizuku.OnRequestPermissionResultListener[1];
+        listenerHolder[0] = (requestCode, grantResult) -> {
+            if (requestCode == PERMISSION_REQUEST_CODE) {
+                boolean granted = grantResult == PackageManager.PERMISSION_GRANTED;
+                if (callback != null) callback.onResult(granted);
+                try { Shizuku.removeRequestPermissionResultListener(listenerHolder[0]); } catch (Exception ignored) {}
+                if (granted) {
+                    shellRetryCount = 0;
+                    mainHandler.postDelayed(() -> initShellServiceWithRetry(), 500);
+                }
             }
-            process.waitFor();
-            reader.close();
-            return output.toString().trim();
+        };
+
+        try {
+            Shizuku.addRequestPermissionResultListener(listenerHolder[0]);
+            Shizuku.requestPermission(PERMISSION_REQUEST_CODE);
         } catch (Exception e) {
-            Log.e(TAG, "降级执行失败", e);
-            return "";
+            Log.e(TAG, "❌ 请求权限异常", e);
+            try { Shizuku.removeRequestPermissionResultListener(listenerHolder[0]); } catch (Exception ignored) {}
+            if (callback != null) callback.onResult(false);
         }
     }
 
@@ -215,10 +243,6 @@ public class ShizukuManager {
     public static boolean checkPort(String ip, int port) {
         String result = executeCommand("timeout 1 bash -c \"echo >/dev/tcp/" + ip + "/" + port + "\" 2>/dev/null && echo open");
         return result.contains("open");
-    }
-
-    public static String tcpProbe(String ip, int port) {
-        return executeCommand("echo 'ping' | timeout 2 bash -c \"cat >/dev/tcp/" + ip + "/" + port + "\" 2>/dev/null && echo done");
     }
 
     public interface OnResultCallback {

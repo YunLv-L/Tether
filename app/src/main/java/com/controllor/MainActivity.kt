@@ -44,12 +44,12 @@ class MainActivity : ComponentActivity() {
         identityManager.start()
 
         // ============================================================
-        // 2️⃣ 初始化 Shizuku (Java 版)
+        // 2️⃣ 初始化所有权限通道 (Shizuku + Dhizuku)
         // ============================================================
-        ShizukuManager.init(applicationContext)
+        CommandExecutor.init(applicationContext)
 
         // ============================================================
-        // 3️⃣ 🚀 启动时自动申请 Shizuku 权限
+        // 3️⃣ 启动时自动申请 Shizuku 权限
         // ============================================================
         requestShizukuPermissionOnStart()
 
@@ -58,7 +58,6 @@ class MainActivity : ComponentActivity() {
                 val viewModel: TetherViewModel = viewModel()
                 LaunchedEffect(Unit) {
                     viewModel.init(applicationContext)
-                    // 传递 IdentityManager 引用给 ViewModel
                     viewModel.setIdentityManager(identityManager)
                 }
                 TetherApp(
@@ -75,7 +74,6 @@ class MainActivity : ComponentActivity() {
     private fun requestShizukuPermissionOnStart() {
         // 检查 Shizuku 是否可用
         if (!ShizukuManager.isAvailable()) {
-            // Shizuku 服务未启动，等待一下再试
             android.util.Log.d("Tether", "⏳ Shizuku 服务未启动，等待 2 秒后重试...")
             android.os.Handler(mainLooper).postDelayed({
                 tryRequestShizukuPermission()
@@ -83,20 +81,16 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        // 检查是否已授权
         if (ShizukuManager.isGranted()) {
             android.util.Log.d("Tether", "✅ Shizuku 权限已授权")
             return
         }
 
-        // 检查是否预 V11 (不支持)
         if (ShizukuManager.canUseHighPrivilege()) {
-            // 已授权但 canUseHighPrivilege 为 true，说明可用
             android.util.Log.d("Tether", "✅ Shizuku 高权限可用")
             return
         }
 
-        // 请求权限
         tryRequestShizukuPermission()
     }
 
@@ -137,7 +131,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 每次返回前台时，检查是否需要重新申请权限
         if (!ShizukuManager.isGranted() && ShizukuManager.isAvailable()) {
             shizukuPermissionRequested = false
             tryRequestShizukuPermission()
@@ -146,7 +139,7 @@ class MainActivity : ComponentActivity() {
 }
 
 // ============================================================
-//  Composable UI (集成 IdentityManager)
+//  Composable UI
 // ============================================================
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -154,11 +147,9 @@ fun TetherApp(
     viewModel: TetherViewModel = viewModel(),
     identityManager: IdentityManager
 ) {
-    // ===== 使用 IdentityManager 的设备列表 =====
     val verifiedPeers by identityManager.verifiedPeers.collectAsState()
     val cachedPeers by identityManager.peers.collectAsState()
 
-    // ===== 兼容旧 ViewModel 状态 =====
     val devices by viewModel.devices.collectAsState()
     val selectedDevice by viewModel.selectedDevice.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
@@ -170,12 +161,10 @@ fun TetherApp(
 
     val context = LocalContext.current
 
-    // ===== 对话框状态 =====
     var showDeleteDialog by remember { mutableStateOf<DeviceInfo?>(null) }
     var showEditDialog by remember { mutableStateOf<DeviceInfo?>(null) }
     var showNoteDialog by remember { mutableStateOf<DeviceInfo?>(null) }
 
-    // ===== Debug 模式触发 =====
     var headerClickCount by remember { mutableStateOf(0) }
     var headerClickStartTime by remember { mutableStateOf(0L) }
 
@@ -190,9 +179,7 @@ fun TetherApp(
                         Text(
                             text = if (isDebugMode) "Tether 🔧" else "Tether",
                             modifier = Modifier.combinedClickable(
-                                onLongClick = {
-                                    viewModel.toggleDebugMode()
-                                },
+                                onLongClick = { viewModel.toggleDebugMode() },
                                 onClick = {
                                     val now = System.currentTimeMillis()
                                     if (now - headerClickStartTime > 3000) {
@@ -218,7 +205,6 @@ fun TetherApp(
                                 modifier = Modifier.height(24.dp)
                             )
                         }
-                        // 显示在线设备数量
                         val onlineCount = verifiedPeers.count { it.isOnline }
                         AssistChip(
                             onClick = {},
@@ -270,7 +256,7 @@ fun TetherApp(
                 .padding(paddingValues)
                 .padding(16.dp)
         ) {
-            // ===== 状态提示 + 进度 =====
+            // ===== 状态提示 =====
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -299,8 +285,8 @@ fun TetherApp(
             }
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ===== Shizuku 状态提示 =====
-            ShizukuStatusRow()
+            // ===== 权限状态行 =====
+            PermissionStatusRow()
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -361,9 +347,7 @@ fun TetherApp(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .combinedClickable(
-                                    onLongClick = {
-                                        showDeleteDialog = device
-                                    },
+                                    onLongClick = { showDeleteDialog = device },
                                     onClick = {
                                         android.util.Log.d("Tether", "点击设备: ${device.ip}")
                                         viewModel.selectDevice(device)
@@ -393,7 +377,6 @@ fun TetherApp(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        // 状态图标
                                         Text(
                                             text = if (device.isOnline) "🟢" else "🔴",
                                             style = MaterialTheme.typography.bodyLarge
@@ -425,7 +408,6 @@ fun TetherApp(
                                             MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                                         }
                                     )
-                                    // 显示机器码 (Debug 模式)
                                     if (isDebugMode && device.machineCode.isNotEmpty()) {
                                         Text(
                                             text = "MC: ${device.machineCode.take(8)}...",
@@ -458,9 +440,7 @@ fun TetherApp(
                     onClick = {
                         if (!ShizukuManager.canUseHighPrivilege()) {
                             ShizukuManager.requestPermission { granted ->
-                                if (granted) {
-                                    viewModel.shizukuScan()
-                                }
+                                if (granted) viewModel.shizukuScan()
                             }
                             return@OutlinedButton
                         }
@@ -668,6 +648,12 @@ fun TetherApp(
                             color = MaterialTheme.colorScheme.onSecondaryContainer,
                             modifier = Modifier.padding(top = 4.dp)
                         )
+                        Text(
+                            text = CommandExecutor.getStatus(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
                 }
             }
@@ -788,53 +774,65 @@ fun TetherApp(
 }
 
 // ============================================================
-//  Shizuku 状态显示
+//  权限状态行 (Shizuku + Dhizuku)
 // ============================================================
 @Composable
-fun ShizukuStatusRow() {
+fun PermissionStatusRow() {
     val shizukuAvailable = ShizukuManager.isAvailable()
     val shizukuGranted = ShizukuManager.isGranted()
     val shellReady = ShizukuManager.isShellServiceReady()
 
+    val dhizukuAvailable = DhizukuManager.isAvailable()
+    val dhizukuGranted = DhizukuManager.isPermissionGranted()
+
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 状态指示灯
-        val statusColor = when {
+        // ===== Shizuku 状态 =====
+        val shizukuColor = when {
             !shizukuAvailable -> MaterialTheme.colorScheme.error
             !shizukuGranted -> MaterialTheme.colorScheme.tertiary
             !shellReady -> MaterialTheme.colorScheme.tertiary
             else -> MaterialTheme.colorScheme.primary
         }
 
-        Canvas(
-            modifier = Modifier.size(10.dp)
-        ) {
-            drawCircle(color = statusColor)
-        }
-
-        val statusText = when {
-            !shizukuAvailable -> "Shizuku 未启动"
-            !shizukuGranted -> "Shizuku 未授权"
-            !shellReady -> "Shell 服务加载中..."
-            else -> "Shizuku 就绪 ✅"
+        Canvas(modifier = Modifier.size(8.dp)) {
+            drawCircle(color = shizukuColor)
         }
 
         Text(
-            text = statusText,
+            text = when {
+                !shizukuAvailable -> "Shizuku: 未启动"
+                !shizukuGranted -> "Shizuku: 未授权"
+                !shellReady -> "Shell: 加载中"
+                else -> "Shizuku: ✅"
+            },
             style = MaterialTheme.typography.labelSmall,
-            color = statusColor,
+            color = shizukuColor,
             modifier = Modifier.weight(1f)
         )
 
-        if (shizukuGranted && shellReady) {
-            Text(
-                text = "🔧 Shell 已就绪",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        // ===== Dhizuku 状态 =====
+        val dhizukuColor = when {
+            !dhizukuAvailable -> MaterialTheme.colorScheme.error
+            !dhizukuGranted -> MaterialTheme.colorScheme.tertiary
+            else -> MaterialTheme.colorScheme.primary
         }
+
+        Canvas(modifier = Modifier.size(8.dp)) {
+            drawCircle(color = dhizukuColor)
+        }
+
+        Text(
+            text = when {
+                !dhizukuAvailable -> "Dhizuku: 不可用"
+                !dhizukuGranted -> "Dhizuku: 未授权"
+                else -> "Dhizuku: ✅"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = dhizukuColor
+        )
     }
 }

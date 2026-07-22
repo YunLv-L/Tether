@@ -8,7 +8,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -78,7 +77,6 @@ class TetherViewModel : ViewModel() {
     @Volatile
     private var isUdpListening = false
 
-    // ===== IdentityManager 集成 =====
     private var identityManager: IdentityManager? = null
 
     fun init(context: Context) {
@@ -90,11 +88,9 @@ class TetherViewModel : ViewModel() {
         nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
     }
 
-    // ===== IdentityManager 设置 =====
     fun setIdentityManager(manager: IdentityManager) {
         this.identityManager = manager
-        
-        // 监听已验证设备变化
+
         viewModelScope.launch {
             manager.verifiedPeers.collect { peers ->
                 val deviceList = peers.map { peer ->
@@ -108,7 +104,6 @@ class TetherViewModel : ViewModel() {
                         machineCode = peer.machineCode
                     )
                 }
-                // 保留手动添加的设备
                 val manualDevices = _devices.value.filter { it.isManual }
                 val allDevices = (deviceList + manualDevices).distinctBy { it.id }
                 _devices.value = allDevices
@@ -116,8 +111,7 @@ class TetherViewModel : ViewModel() {
                 Log.d("Tether", "IdentityManager 更新设备: ${allDevices.size} 台")
             }
         }
-        
-        // 监听缓存设备变化（未验证但 60s 内出现过）
+
         viewModelScope.launch {
             manager.peers.collect { cachedPeers ->
                 val verifiedIds = _devices.value.map { it.id }.toSet()
@@ -134,7 +128,6 @@ class TetherViewModel : ViewModel() {
                             machineCode = peer.machineCode
                         )
                     }
-                // 只更新缓存设备部分，不覆盖已验证设备
                 val currentDevices = _devices.value.filter { it.id in verifiedIds || it.isManual }
                 _devices.value = currentDevices + cachedDevices
             }
@@ -210,6 +203,8 @@ class TetherViewModel : ViewModel() {
             val status = if (device.isOnline) "🟢" else "🔴"
             info.appendLine("[$index] $status ${device.ip} | ${device.name} | MC: ${device.machineCode.take(8)}...")
         }
+        info.appendLine("━━━━━━━━━━━━━━━━━")
+        info.appendLine(CommandExecutor.getStatus())
         return info.toString()
     }
 
@@ -240,7 +235,6 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    // ==================== UDP 广播发现 (旧版，保留兼容) ====================
     private fun updateDevicesFromCache() {
         val now = System.currentTimeMillis()
         val aliveDevices = udpCache.filter { now - it.value.hashCode() < cacheTimeout }
@@ -340,7 +334,6 @@ class TetherViewModel : ViewModel() {
         Log.d("Tether", "UDP 监听停止请求")
     }
 
-    // ==================== 混合发现 (旧版兼容) ====================
     fun startHybridDiscovery() {
         if (_isScanning.value) {
             stopScan()
@@ -376,7 +369,6 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    // ==================== 深度扫描（兜底） ====================
     fun deepScan() {
         if (_isScanning.value) {
             _statusMessage.value = "扫描进行中..."
@@ -403,10 +395,10 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    // ==================== Shizuku 高权限扫描 ====================
+    // ===== Shizuku 高权限扫描（使用 CommandExecutor） =====
     fun shizukuScan() {
-        if (!ShizukuManager.canUseHighPrivilege()) {
-            _statusMessage.value = "Shizuku 不可用，请先启动 Shizuku"
+        if (!ShizukuManager.canUseHighPrivilege() && !DhizukuManager.isPermissionGranted()) {
+            _statusMessage.value = "Shizuku 和 Dhizuku 均不可用"
             return
         }
 
@@ -418,7 +410,7 @@ class TetherViewModel : ViewModel() {
         _devices.value = emptyList()
         _selectedDevice.value = null
         _isScanning.value = true
-        _statusMessage.value = "Shizuku 扫描中..."
+        _statusMessage.value = "高权限扫描中..."
         _scanProgress.value = "0/254"
 
         scanJob = viewModelScope.launch {
@@ -431,9 +423,16 @@ class TetherViewModel : ViewModel() {
                     if (!_isScanning.value) break
                     val ip = "$baseIp.$i"
 
-                    if (ShizukuManager.pingHost(ip)) {
-                        if (ShizukuManager.checkPort(ip, tcpPort)) {
-                            val deviceInfo = shizukuGetDeviceInfo(ip)
+                    // 使用 CommandExecutor 执行 ping
+                    val pingResult = CommandExecutor.executeCommand("ping -c 1 -W 1 $ip 2>/dev/null && echo alive")
+                    val isAlive = pingResult.contains("alive") || pingResult.contains("1 received")
+
+                    if (isAlive) {
+                        val portResult = CommandExecutor.executeCommand(
+                            "timeout 1 bash -c \"echo >/dev/tcp/$ip/$tcpPort\" 2>/dev/null && echo open"
+                        )
+                        if (portResult.contains("open")) {
+                            val deviceInfo = getDeviceInfoViaCommand(ip)
                             if (deviceInfo != null) {
                                 foundCount++
                                 val currentMap = _devices.value.associateBy { it.id }.toMutableMap()
@@ -456,7 +455,7 @@ class TetherViewModel : ViewModel() {
                 _isScanning.value = false
                 _scanProgress.value = "254/254"
                 _statusMessage.value = if (foundCount > 0) {
-                    "发现 ${foundCount} 台设备 (Shizuku)"
+                    "发现 ${foundCount} 台设备 (高权限扫描)"
                 } else {
                     "未发现设备，请检查 PC Agent 是否运行"
                 }
@@ -464,23 +463,19 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    private suspend fun shizukuGetDeviceInfo(ip: String): DeviceInfo? {
+    private suspend fun getDeviceInfoViaCommand(ip: String): DeviceInfo? {
         return withContext(Dispatchers.IO) {
             try {
-                val result = ShizukuManager.executeCommand(
-                    "echo 'ping' | timeout 2 nc $ip $tcpPort 2>/dev/null"
+                val result = CommandExecutor.executeCommand(
+                    "echo 'ping' | timeout 2 bash -c \"cat >/dev/tcp/$ip/$tcpPort\" 2>/dev/null && echo done"
                 )
-                val finalResult = if (result.isEmpty()) {
-                    ShizukuManager.executeCommand(
-                        "timeout 2 bash -c \"echo 'ping' > /dev/tcp/$ip/$tcpPort && cat < /dev/tcp/$ip/$tcpPort\" 2>/dev/null"
+                if (result.isNotEmpty()) {
+                    // 尝试通过 nc 获取更多信息
+                    val infoResult = CommandExecutor.executeCommand(
+                        "echo 'ping' | nc -w 1 $ip $tcpPort 2>/dev/null"
                     )
-                } else {
-                    result
-                }
-
-                if (finalResult.isNotEmpty() && finalResult.startsWith("pong")) {
-                    val parts = finalResult.split("|")
-                    val deviceName = if (parts.size >= 2) parts[1] else "PC"
+                    val parts = infoResult.split("|")
+                    val deviceName = if (parts.size >= 2 && parts[1].isNotEmpty()) parts[1] else "PC"
                     val machineCode = if (parts.size >= 4) parts[3] else ""
                     val id = if (machineCode.isNotEmpty()) machineCode else "$deviceName|$ip"
                     return@withContext DeviceInfo(
@@ -492,13 +487,12 @@ class TetherViewModel : ViewModel() {
                     )
                 }
             } catch (e: Exception) {
-                Log.d("Tether", "Shizuku 获取设备信息失败: $ip", e)
+                Log.d("Tether", "获取设备信息失败: $ip", e)
             }
             null
         }
     }
 
-    // ==================== mDNS 发现 ====================
     private suspend fun performMdnsDiscovery(): Boolean {
         val manager = nsdManager ?: return false
         var found = false
@@ -591,7 +585,6 @@ class TetherViewModel : ViewModel() {
         return found
     }
 
-    // ==================== TCP 深度扫描 ====================
     private suspend fun performTcpDiscovery(foundDevices: MutableMap<String, DeviceInfo>) {
         val baseIp = getLocalIpBase()
         val total = 254
@@ -693,7 +686,6 @@ class TetherViewModel : ViewModel() {
         _statusMessage.value = "扫描已停止"
     }
 
-    // ===== 设备管理方法 =====
     fun deleteDevice(device: DeviceInfo) {
         val newList = _devices.value.filter { it.id != device.id }
         _devices.value = newList
@@ -730,7 +722,6 @@ class TetherViewModel : ViewModel() {
         _statusMessage.value = "已更新备注: $note"
     }
 
-    // ===== selectDevice 支持 null =====
     fun selectDevice(device: DeviceInfo?) {
         _selectedDevice.value = device
         if (device != null) {

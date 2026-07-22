@@ -44,7 +44,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("androidx.core:core-ktx:1.13.1")
 
-    // Shizuku
+    // Shizuku API
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+
+    // Dhizuku API
+    implementation("io.github.iamr0s:Dhizuku-API:2.0.0")
 }
