@@ -49,5 +49,5 @@ dependencies {
     implementation("dev.rikka.shizuku:provider:13.1.5")
 
     // Dhizuku API
-    implementation("io.github.iamr0s:Dhizuku-API:1.1.0")
+    implementation(project(":dhizuku-api"))
 }

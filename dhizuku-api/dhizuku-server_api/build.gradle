@@ -1,0 +1,102 @@
+plugins {
+    alias(libs.plugins.agp.lib)
+    id('maven-publish')
+    id('signing')
+}
+
+def publishingProps = new Properties()
+def publishingFile = file("${rootDir}/keystore/publishing.properties")
+if (publishingFile.exists()) {
+    publishingProps.load(publishingFile.newInputStream())
+}
+
+android {
+    namespace = 'com.rosan.dhizuku.server_api'
+    compileSdk = TARGET_SDK
+
+    defaultConfig {
+        minSdk = MIN_SDK
+        targetSdk = TARGET_SDK
+    }
+
+    buildFeatures {
+        buildConfig = false
+        aidl = true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
+}
+
+dependencies {
+    implementation(libs.appprocess)
+    api project(':Dhizuku-API')
+    compileOnly(libs.annotation)
+    compileOnly project(':hidden-api')
+}
+
+publishing {
+    publications {
+        mavenRelease(MavenPublication) {
+            afterEvaluate {
+                from components.findByName('release')
+            }
+
+            group = publishingProps['groupId']
+            artifactId = publishingProps['serverApi.artifactId']
+            version = SERVER_API_VERSION
+
+            pom {
+                name = publishingProps['pom.name']
+                description = publishingProps['pom.description']
+                inceptionYear = publishingProps['pom.inceptionYear']
+                url = publishingProps['pom.url']
+                scm {
+                    url = publishingProps['pom.scmUrl']
+                    connection = publishingProps['pom.scmConnection']
+                }
+                licenses {
+                    license {
+                        name = publishingProps['pom.licenceName']
+                        url = publishingProps['pom.licenceUrl']
+                    }
+                }
+                developers {
+                    developer {
+                        name = publishingProps['pom.developerName']
+                        url = publishingProps['pom.developerUrl']
+                    }
+                }
+            }
+        }
+    }
+    repositories {
+        maven {
+            url = uri(rootProject.layout.buildDirectory.dir("staging").get().asFile)
+        }
+    }
+}
+
+signing {
+    if (publishingFile.exists()) {
+        def privateKey = publishingProps['signing.privateKey']
+        if (privateKey == null) {
+            privateKey = file(publishingProps['signing.secretKeyRingFile']).text
+        }
+        useInMemoryPgpKeys(
+                publishingProps['signing.keyId'],
+                privateKey,
+                publishingProps['signing.password']
+        )
+    }
+    sign publishing.publications
+}

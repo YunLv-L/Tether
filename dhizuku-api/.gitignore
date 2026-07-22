@@ -1,0 +1,14 @@
+# Gradle
+/.gradle/
+# Android SDK
+/local.properties
+# Gradle Build
+/*/build/
+# AGP Lint
+/build/
+# IntelliJ
+/.idea/
+# VS Code
+/.vscode/
+# Keystore
+/keystore/

@@ -1,0 +1,13 @@
+[versions]
+agp = "9.3.0"
+annotation = "1.10.0"
+androidappprocess = "1.4.3"
+core = "1.19.0"
+
+[plugins]
+agp-lib = { id = "com.android.library", version.ref = "agp" }
+
+[libraries]
+annotation = { group = "androidx.annotation", name = "annotation", version.ref = "annotation" }
+appprocess = { group = "io.github.iamr0s", name = "AndroidAppProcess", version.ref = "androidappprocess" }
+core = { group = "androidx.core", name = "core", version.ref = "core" }

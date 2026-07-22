@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<device-admin>
+    <uses-policies>
+        <limit-password />
+        <expire-password />
+        <reset-password />
+        <watch-login />
+        <force-lock />
+        <wipe-data />
+        <encrypted-storage />
+        <disable-camera />
+        <set-global-proxy />
+        <disable-keyguard-features />
+    </uses-policies>
+    <!--suppress AndroidElementNotAllowed -->
+    <support-transfer-ownership />
+</device-admin>

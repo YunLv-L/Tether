@@ -14,3 +14,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "Tether"
 include(":app")
+include(":dhizuku-api")
+project(":dhizuku-api").projectDir = file("dhizuku-api/dhizuku-api")

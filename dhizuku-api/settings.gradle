@@ -1,0 +1,23 @@
+pluginManagement {
+    repositories {
+        mavenLocal()
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenLocal()
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "Dhizuku-API"
+include ':hidden-api'
+include ':Dhizuku-API'
+project(':Dhizuku-API').projectDir = file("${rootDir.path}/dhizuku-api")
+include ':Dhizuku-SERVER_API'
+project(':Dhizuku-SERVER_API').projectDir = file("${rootDir.path}/dhizuku-server_api")
