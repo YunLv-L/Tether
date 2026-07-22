@@ -1,7 +1,6 @@
 package com.tether.controller
 
 import android.content.Context
-import android.net.DhcpInfo
 import android.net.wifi.WifiManager
 import android.util.Log
 import kotlinx.coroutines.*
@@ -9,15 +8,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.net.*
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.min
 
 class IdentityManager(private val context: Context) {
     companion object {
         private const val TAG = "IdentityManager"
         private const val UDP_PORT = 5555
         private const val TCP_PORT = 5556
-        private const val CACHE_TTL_MS = 60000L      // 60s 滞留
-        private const val BROADCAST_INTERVAL_MS = 15000L // 15s 发一次
+        private const val CACHE_TTL_MS = 60000L
+        private const val BROADCAST_INTERVAL_MS = 15000L
         private const val HANDSHAKE_TIMEOUT_MS = 3000L
         private const val HEARTBEAT_INTERVAL_MS = 10000L
     }
@@ -28,16 +26,14 @@ class IdentityManager(private val context: Context) {
     private val _verifiedPeers = MutableStateFlow<List<PeerInfo>>(emptyList())
     val verifiedPeers: StateFlow<List<PeerInfo>> = _verifiedPeers
 
-    // 60s 滞留缓存
     private val cache = ConcurrentHashMap<String, CachedPeer>()
-
-    // 已验证设备
     private val verified = ConcurrentHashMap<String, VerifiedPeer>()
 
     private var isRunning = false
     private var serverJob: Job? = null
     private var broadcastJob: Job? = null
     private var heartbeatJob: Job? = null
+    private var tcpServerJob: Job? = null
     private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val machineCode: String by lazy { generateMachineCode() }
@@ -51,6 +47,7 @@ class IdentityManager(private val context: Context) {
         serverJob = scope.launch { udpServerLoop() }
         broadcastJob = scope.launch { udpBroadcastLoop() }
         heartbeatJob = scope.launch { heartbeatLoop() }
+        tcpServerJob = scope.launch { tcpServerLoop() }
     }
 
     fun stop() {
@@ -58,6 +55,7 @@ class IdentityManager(private val context: Context) {
         serverJob?.cancel()
         broadcastJob?.cancel()
         heartbeatJob?.cancel()
+        tcpServerJob?.cancel()
         scope.cancel()
         Log.d(TAG, "🛑 IdentityManager 停止")
     }
@@ -89,11 +87,9 @@ class IdentityManager(private val context: Context) {
 
                     val identity = IdentityPacket.parse(data, ip) ?: continue
 
-                    // 存入 60s 缓存 (自动去重)
                     val cached = CachedPeer(identity, System.currentTimeMillis(), false)
                     cache[identity.machineCode] = cached
 
-                    // 检查是否已验证
                     if (verified.containsKey(identity.machineCode)) {
                         verified[identity.machineCode]?.let {
                             it.lastSeen = System.currentTimeMillis()
@@ -102,7 +98,7 @@ class IdentityManager(private val context: Context) {
                         Log.d(TAG, "🔄 设备在线: ${identity.deviceName} (${identity.ip})")
                     } else {
                         Log.d(TAG, "📡 发现新设备: ${identity.deviceName} (${identity.ip})")
-                        // 自动发起三次握手
+                        // 自动发起三次握手 (作为客户端)
                         scope.launch { initiateHandshake(identity) }
                     }
 
@@ -162,7 +158,129 @@ class IdentityManager(private val context: Context) {
     }
 
     // ================================================================
-    //  发起三次握手
+    //  TCP 服务器 (接收 PC Agent 的握手请求)  ← 新增
+    // ================================================================
+    private suspend fun tcpServerLoop() = withContext(Dispatchers.IO) {
+        var serverSocket: ServerSocket? = null
+        try {
+            serverSocket = ServerSocket(TCP_PORT)
+            Log.d(TAG, "🔌 TCP 服务器启动 (端口 $TCP_PORT)")
+
+            while (isRunning) {
+                try {
+                    val socket = serverSocket.accept()
+                    scope.launch { handleTcpConnection(socket) }
+                } catch (e: SocketException) {
+                    if (!isRunning) break
+                    Log.e(TAG, "TCP 服务器异常", e)
+                } catch (e: Exception) {
+                    Log.e(TAG, "TCP 连接接受异常", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "TCP 服务器启动失败", e)
+        } finally {
+            serverSocket?.close()
+            Log.d(TAG, "TCP 服务器已停止")
+        }
+    }
+
+    private suspend fun handleTcpConnection(socket: Socket) {
+        try {
+            val input = socket.getInputStream()
+            val output = socket.getOutputStream()
+            val buffer = ByteArray(1024)
+
+            val len = input.read(buffer)
+            if (len <= 0) {
+                socket.close()
+                return
+            }
+
+            val request = String(buffer, 0, len, Charsets.UTF_8).trim()
+            Log.d(TAG, "📨 TCP 收到: $request")
+
+            // ===== 处理 SYN (PC Agent 发起握手) =====
+            if (request.startsWith("SYN|")) {
+                val parts = request.split('|')
+                if (parts.size >= 2) {
+                    val agentMachineCode = parts[1]
+                    val agentName = if (parts.size >= 3) parts[2] else "PC"
+
+                    // 检查是否在缓存中 (60s 内出现过)
+                    val cached = cache[agentMachineCode]
+                    if (cached != null) {
+                        // 发送 SYN-ACK
+                        val synAck = "SYN-ACK|$agentMachineCode|${System.currentTimeMillis()}\n"
+                        output.write(synAck.toByteArray(Charsets.UTF_8))
+                        output.flush()
+                        Log.d(TAG, "✅ SYN-ACK 已发送 → $agentMachineCode")
+
+                        // 等待 ACK
+                        val len2 = input.read(buffer)
+                        if (len2 > 0) {
+                            val ack = String(buffer, 0, len2, Charsets.UTF_8).trim()
+                            if (ack.startsWith("ACK|")) {
+                                val ackParts = ack.split('|')
+                                if (ackParts.size >= 2 && ackParts[1] == machineCode) {
+                                    // ✅ 三次握手完成！
+                                    val peer = VerifiedPeer(
+                                        machineCode = agentMachineCode,
+                                        ip = socket.inetAddress.hostAddress ?: "",
+                                        deviceName = agentName,
+                                        verifiedAt = System.currentTimeMillis(),
+                                        lastSeen = System.currentTimeMillis(),
+                                        isOnline = true,
+                                        socket = socket
+                                    )
+                                    verified[agentMachineCode] = peer
+                                    cache.remove(agentMachineCode)
+
+                                    // 发送 CONNECTED
+                                    val connected = "CONNECTED|$deviceName|$machineCode\n"
+                                    output.write(connected.toByteArray(Charsets.UTF_8))
+                                    output.flush()
+
+                                    Log.d(TAG, "✅ 三次握手完成! $agentName (${socket.inetAddress.hostAddress}) 已验证")
+                                    updatePeers()
+                                    return
+                                }
+                            }
+                        }
+                    } else {
+                        // 不在缓存中，拒绝
+                        val reject = "REJECT|Unknown device\n"
+                        output.write(reject.toByteArray(Charsets.UTF_8))
+                        output.flush()
+                        Log.d(TAG, "❌ 握手拒绝: $agentMachineCode (不在缓存中)")
+                        socket.close()
+                        return
+                    }
+                }
+            }
+
+            // ===== 心跳 PING =====
+            if (request.startsWith("PING")) {
+                val pong = "PONG|$deviceName|$machineCode\n"
+                output.write(pong.toByteArray(Charsets.UTF_8))
+                output.flush()
+                Log.d(TAG, "💓 PONG 已发送")
+                socket.close()
+                return
+            }
+
+            // ===== 未知请求 =====
+            Log.d(TAG, "⚠️ 未知 TCP 请求: $request")
+            socket.close()
+
+        } catch (e: Exception) {
+            Log.e(TAG, "TCP 连接处理异常", e)
+            try { socket.close() } catch (_: Exception) {}
+        }
+    }
+
+    // ================================================================
+    //  发起三次握手 (Tether 主动连接 PC Agent)
     // ================================================================
     private suspend fun initiateHandshake(identity: IdentityPacket) {
         withContext(Dispatchers.IO) {
@@ -180,12 +298,10 @@ class IdentityManager(private val context: Context) {
                     val output = socket.getOutputStream()
                     val input = socket.getInputStream()
 
-                    // 发送 SYN
                     val syn = "SYN|$machineCode|$deviceName\n"
                     output.write(syn.toByteArray(Charsets.UTF_8))
                     output.flush()
 
-                    // 等待 SYN-ACK
                     val buffer = ByteArray(1024)
                     val len = input.read(buffer)
                     if (len <= 0) {
@@ -197,12 +313,10 @@ class IdentityManager(private val context: Context) {
                     if (response.startsWith("SYN-ACK|")) {
                         val parts = response.split('|')
                         if (parts.size >= 2 && parts[1] == identity.machineCode) {
-                            // 发送 ACK
                             val ack = "ACK|$machineCode\n"
                             output.write(ack.toByteArray(Charsets.UTF_8))
                             output.flush()
 
-                            // 等待 CONNECTED
                             val len2 = input.read(buffer)
                             if (len2 > 0) {
                                 val connected = String(buffer, 0, len2, Charsets.UTF_8).trim()
@@ -210,7 +324,6 @@ class IdentityManager(private val context: Context) {
                                     val connectedParts = connected.split('|')
                                     val agentName = if (connectedParts.size >= 2) connectedParts[1] else "PC"
 
-                                    // 握手完成！
                                     val peer = VerifiedPeer(
                                         machineCode = identity.machineCode,
                                         ip = identity.ip,
@@ -221,8 +334,6 @@ class IdentityManager(private val context: Context) {
                                         socket = socket
                                     )
                                     verified[identity.machineCode] = peer
-
-                                    // 从缓存中移除
                                     cache.remove(identity.machineCode)
 
                                     Log.d(TAG, "✅ 三次握手完成! $agentName (${identity.ip}) 已验证")
@@ -233,7 +344,6 @@ class IdentityManager(private val context: Context) {
                         }
                     }
 
-                    // 握手失败
                     Log.d(TAG, "❌ 三次握手失败: ${identity.deviceName}")
                 } catch (e: Exception) {
                     Log.d(TAG, "❌ 握手异常: ${e.message}")
@@ -247,14 +357,13 @@ class IdentityManager(private val context: Context) {
     }
 
     // ================================================================
-    //  心跳保活 (每 10s 检查)
+    //  心跳保活
     // ================================================================
     private suspend fun heartbeatLoop() = withContext(Dispatchers.IO) {
         while (isRunning) {
             try {
                 val now = System.currentTimeMillis()
 
-                // 检查已验证设备是否超时 (60s 无心跳)
                 for (entry in verified.values) {
                     if (now - entry.lastSeen > 60000) {
                         if (entry.isOnline) {
@@ -265,7 +374,6 @@ class IdentityManager(private val context: Context) {
                     }
                 }
 
-                // 清理缓存过期包 (60s TTL)
                 val expiredKeys = cache.entries
                     .filter { now - it.value.receivedAt > CACHE_TTL_MS }
                     .map { it.key }
@@ -273,7 +381,6 @@ class IdentityManager(private val context: Context) {
                     cache.remove(key)
                 }
 
-                // 主动发送心跳到已验证设备
                 for (entry in verified.values) {
                     if (entry.isOnline) {
                         try {
@@ -306,7 +413,6 @@ class IdentityManager(private val context: Context) {
                 output.write("PING\n".toByteArray(Charsets.UTF_8))
                 output.flush()
 
-                // 等待 PONG
                 val buffer = ByteArray(1024)
                 val input = socket.getInputStream()
                 val len = input.read(buffer)
@@ -335,20 +441,16 @@ class IdentityManager(private val context: Context) {
         val peerList = verified.values.map { it.toPeerInfo() }
         _verifiedPeers.value = peerList
 
-        // 同时显示缓存中的设备 (未验证但 60s 内出现过)
         val cachedList = cache.values.map { it.identity.toPeerInfo(false) }
         _peers.value = (peerList + cachedList).distinctBy { it.machineCode }
     }
 
     // ================================================================
-    //  获取验证过的设备 (供其他模块使用)
+    //  获取验证过的设备
     // ================================================================
     fun getVerifiedPeers(): List<PeerInfo> = _verifiedPeers.value
     fun getVerifiedPeer(machineCode: String): PeerInfo? = verified[machineCode]?.toPeerInfo()
 
-    // ================================================================
-    //  画面连接验证 (ScreenActivity 使用)
-    // ================================================================
     fun validateScreenConnection(machineCode: String): Boolean {
         return verified.containsKey(machineCode)
     }
@@ -379,7 +481,6 @@ class IdentityManager(private val context: Context) {
                 ni.inetAddresses?.toList()?.forEach { addr ->
                     if (!addr.isLoopbackAddress && addr is Inet4Address) {
                         val ip = addr.hostAddress ?: return@forEach
-                        // 私有 IP 段
                         if (ip.startsWith("192.168.") || ip.startsWith("10.") ||
                             ip.startsWith("172.16.") || ip.startsWith("172.17.") ||
                             ip.startsWith("172.18.") || ip.startsWith("172.19.") ||
@@ -417,7 +518,6 @@ class IdentityManager(private val context: Context) {
     private fun generateMachineCode(): String {
         try {
             val builder = StringBuilder()
-            // 使用 Android ID + 硬件信息
             builder.append(android.provider.Settings.Secure.getString(
                 context.contentResolver,
                 android.provider.Settings.Secure.ANDROID_ID
@@ -516,7 +616,6 @@ class IdentityManager(private val context: Context) {
     )
 }
 
-// IPAddress 扩展
 object IPAddress {
     fun isLoopback(ip: String): Boolean {
         return ip == "127.0.0.1" || ip == "::1" || ip.startsWith("127.")
