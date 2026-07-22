@@ -221,7 +221,7 @@ class IdentityManager(private val context: Context) {
                         Log.d(TAG, "✅ SYN-ACK 已发送 → $agentMachineCode")
 
                         // ✅ 等待 ACK (超时 3 秒)
-                        socket.soTimeout = HANDSHAKE_TIMEOUT_MS
+                        socket.soTimeout = HANDSHAKE_TIMEOUT_MS.toInt()
                         try {
                             val len2 = input.read(buffer)
                             if (len2 > 0) {
