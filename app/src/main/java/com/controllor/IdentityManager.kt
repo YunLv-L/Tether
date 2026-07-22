@@ -98,7 +98,6 @@ class IdentityManager(private val context: Context) {
                         Log.d(TAG, "🔄 设备在线: ${identity.deviceName} (${identity.ip})")
                     } else {
                         Log.d(TAG, "📡 发现新设备: ${identity.deviceName} (${identity.ip})")
-                        // 自动发起三次握手 (作为客户端)
                         scope.launch { initiateHandshake(identity) }
                     }
 
@@ -158,7 +157,7 @@ class IdentityManager(private val context: Context) {
     }
 
     // ================================================================
-    //  TCP 服务器 (接收 PC Agent 的握手请求)  ← 新增
+    //  TCP 服务器 (接收 PC Agent 的握手请求)
     // ================================================================
     private suspend fun tcpServerLoop() = withContext(Dispatchers.IO) {
         var serverSocket: ServerSocket? = null
@@ -185,6 +184,9 @@ class IdentityManager(private val context: Context) {
         }
     }
 
+    // ================================================================
+    //  TCP 连接处理 (修复版：确保 return)
+    // ================================================================
     private suspend fun handleTcpConnection(socket: Socket) {
         try {
             val input = socket.getInputStream()
@@ -200,7 +202,9 @@ class IdentityManager(private val context: Context) {
             val request = String(buffer, 0, len, Charsets.UTF_8).trim()
             Log.d(TAG, "📨 TCP 收到: $request")
 
-            // ===== 处理 SYN (PC Agent 发起握手) =====
+            // ============================================================
+            // 处理 SYN (PC Agent 发起握手)
+            // ============================================================
             if (request.startsWith("SYN|")) {
                 val parts = request.split('|')
                 if (parts.size >= 2) {
@@ -210,43 +214,52 @@ class IdentityManager(private val context: Context) {
                     // 检查是否在缓存中 (60s 内出现过)
                     val cached = cache[agentMachineCode]
                     if (cached != null) {
-                        // 发送 SYN-ACK
+                        // ✅ 发送 SYN-ACK
                         val synAck = "SYN-ACK|$agentMachineCode|${System.currentTimeMillis()}\n"
                         output.write(synAck.toByteArray(Charsets.UTF_8))
                         output.flush()
                         Log.d(TAG, "✅ SYN-ACK 已发送 → $agentMachineCode")
 
-                        // 等待 ACK
-                        val len2 = input.read(buffer)
-                        if (len2 > 0) {
-                            val ack = String(buffer, 0, len2, Charsets.UTF_8).trim()
-                            if (ack.startsWith("ACK|")) {
-                                val ackParts = ack.split('|')
-                                if (ackParts.size >= 2 && ackParts[1] == machineCode) {
-                                    // ✅ 三次握手完成！
-                                    val peer = VerifiedPeer(
-                                        machineCode = agentMachineCode,
-                                        ip = socket.inetAddress.hostAddress ?: "",
-                                        deviceName = agentName,
-                                        verifiedAt = System.currentTimeMillis(),
-                                        lastSeen = System.currentTimeMillis(),
-                                        isOnline = true,
-                                        socket = socket
-                                    )
-                                    verified[agentMachineCode] = peer
-                                    cache.remove(agentMachineCode)
+                        // ✅ 等待 ACK (超时 3 秒)
+                        socket.soTimeout = HANDSHAKE_TIMEOUT_MS
+                        try {
+                            val len2 = input.read(buffer)
+                            if (len2 > 0) {
+                                val ack = String(buffer, 0, len2, Charsets.UTF_8).trim()
+                                if (ack.startsWith("ACK|")) {
+                                    val ackParts = ack.split('|')
+                                    if (ackParts.size >= 2 && ackParts[1] == machineCode) {
+                                        // ✅ 三次握手完成！
+                                        val peer = VerifiedPeer(
+                                            machineCode = agentMachineCode,
+                                            ip = socket.inetAddress.hostAddress ?: "",
+                                            deviceName = agentName,
+                                            verifiedAt = System.currentTimeMillis(),
+                                            lastSeen = System.currentTimeMillis(),
+                                            isOnline = true,
+                                            socket = socket
+                                        )
+                                        verified[agentMachineCode] = peer
+                                        cache.remove(agentMachineCode)
 
-                                    // 发送 CONNECTED
-                                    val connected = "CONNECTED|$deviceName|$machineCode\n"
-                                    output.write(connected.toByteArray(Charsets.UTF_8))
-                                    output.flush()
+                                        // 发送 CONNECTED
+                                        val connected = "CONNECTED|$deviceName|$machineCode\n"
+                                        output.write(connected.toByteArray(Charsets.UTF_8))
+                                        output.flush()
 
-                                    Log.d(TAG, "✅ 三次握手完成! $agentName (${socket.inetAddress.hostAddress}) 已验证")
-                                    updatePeers()
-                                    return
+                                        Log.d(TAG, "✅ 三次握手完成! $agentName (${socket.inetAddress.hostAddress}) 已验证")
+                                        updatePeers()
+                                        // ✅ 关键修复：return 退出，不继续执行
+                                        return
+                                    }
                                 }
                             }
+                        } catch (e: SocketTimeoutException) {
+                            Log.d(TAG, "⚠️ 等待 ACK 超时: $agentMachineCode")
                         }
+                        // 如果 ACK 超时或格式错误，关闭连接
+                        socket.close()
+                        return
                     } else {
                         // 不在缓存中，拒绝
                         val reject = "REJECT|Unknown device\n"
@@ -259,7 +272,9 @@ class IdentityManager(private val context: Context) {
                 }
             }
 
-            // ===== 心跳 PING =====
+            // ============================================================
+            // 心跳 PING
+            // ============================================================
             if (request.startsWith("PING")) {
                 val pong = "PONG|$deviceName|$machineCode\n"
                 output.write(pong.toByteArray(Charsets.UTF_8))
@@ -269,7 +284,9 @@ class IdentityManager(private val context: Context) {
                 return
             }
 
-            // ===== 未知请求 =====
+            // ============================================================
+            // 未知请求
+            // ============================================================
             Log.d(TAG, "⚠️ 未知 TCP 请求: $request")
             socket.close()
 
