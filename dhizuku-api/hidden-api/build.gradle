@@ -1,18 +1,18 @@
 plugins {
-    alias(libs.plugins.agp.lib)
+    id('com.android.library')
 }
 
 android {
     namespace = "com.rosan.hidden_api"
-    compileSdk = TARGET_SDK
+    compileSdk = 34
 
     defaultConfig {
-        minSdk = MIN_SDK
+        minSdk = 24
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_21
-        targetCompatibility JavaVersion.VERSION_21
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     lintOptions {
@@ -21,5 +21,5 @@ android {
 }
 
 dependencies {
-    compileOnly(libs.annotation)
+    compileOnly("androidx.annotation:annotation:1.10.0")
 }
