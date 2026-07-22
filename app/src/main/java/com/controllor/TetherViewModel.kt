@@ -12,6 +12,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
@@ -77,6 +78,9 @@ class TetherViewModel : ViewModel() {
     @Volatile
     private var isUdpListening = false
 
+    // ===== IdentityManager 集成 =====
+    private var identityManager: IdentityManager? = null
+
     fun init(context: Context) {
         this.context = context
         prefs = context.getSharedPreferences("tether_devices", Context.MODE_PRIVATE)
@@ -84,6 +88,57 @@ class TetherViewModel : ViewModel() {
         loadDevices()
         _quality.value = prefs.getInt("quality", 1)
         nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
+    }
+
+    // ===== IdentityManager 设置 =====
+    fun setIdentityManager(manager: IdentityManager) {
+        this.identityManager = manager
+        
+        // 监听已验证设备变化
+        viewModelScope.launch {
+            manager.verifiedPeers.collect { peers ->
+                val deviceList = peers.map { peer ->
+                    DeviceInfo(
+                        id = peer.machineCode,
+                        ip = peer.ip,
+                        name = peer.deviceName,
+                        isManual = false,
+                        note = if (peer.isVerified) "✅ 已验证" else "",
+                        isOnline = peer.isOnline,
+                        machineCode = peer.machineCode
+                    )
+                }
+                // 保留手动添加的设备
+                val manualDevices = _devices.value.filter { it.isManual }
+                val allDevices = (deviceList + manualDevices).distinctBy { it.id }
+                _devices.value = allDevices
+                saveDevices()
+                Log.d("Tether", "IdentityManager 更新设备: ${allDevices.size} 台")
+            }
+        }
+        
+        // 监听缓存设备变化（未验证但 60s 内出现过）
+        viewModelScope.launch {
+            manager.peers.collect { cachedPeers ->
+                val verifiedIds = _devices.value.map { it.id }.toSet()
+                val cachedDevices = cachedPeers
+                    .filter { it.machineCode !in verifiedIds }
+                    .map { peer ->
+                        DeviceInfo(
+                            id = peer.machineCode,
+                            ip = peer.ip,
+                            name = peer.deviceName,
+                            isManual = false,
+                            note = "⏳ 发现中...",
+                            isOnline = false,
+                            machineCode = peer.machineCode
+                        )
+                    }
+                // 只更新缓存设备部分，不覆盖已验证设备
+                val currentDevices = _devices.value.filter { it.id in verifiedIds || it.isManual }
+                _devices.value = currentDevices + cachedDevices
+            }
+        }
     }
 
     private fun saveDevices() {
@@ -185,7 +240,7 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    // ==================== UDP 广播发现 ====================
+    // ==================== UDP 广播发现 (旧版，保留兼容) ====================
     private fun updateDevicesFromCache() {
         val now = System.currentTimeMillis()
         val aliveDevices = udpCache.filter { now - it.value.hashCode() < cacheTimeout }
@@ -285,7 +340,7 @@ class TetherViewModel : ViewModel() {
         Log.d("Tether", "UDP 监听停止请求")
     }
 
-    // ==================== 混合发现 ====================
+    // ==================== 混合发现 (旧版兼容) ====================
     fun startHybridDiscovery() {
         if (_isScanning.value) {
             stopScan()
@@ -321,7 +376,7 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    // ==================== 深度扫描（手动触发，兜底） ====================
+    // ==================== 深度扫描（兜底） ====================
     fun deepScan() {
         if (_isScanning.value) {
             _statusMessage.value = "扫描进行中..."
@@ -536,7 +591,7 @@ class TetherViewModel : ViewModel() {
         return found
     }
 
-    // ==================== TCP 深度扫描（兜底，手动触发） ====================
+    // ==================== TCP 深度扫描 ====================
     private suspend fun performTcpDiscovery(foundDevices: MutableMap<String, DeviceInfo>) {
         val baseIp = getLocalIpBase()
         val total = 254
@@ -638,6 +693,7 @@ class TetherViewModel : ViewModel() {
         _statusMessage.value = "扫描已停止"
     }
 
+    // ===== 设备管理方法 =====
     fun deleteDevice(device: DeviceInfo) {
         val newList = _devices.value.filter { it.id != device.id }
         _devices.value = newList
@@ -672,6 +728,15 @@ class TetherViewModel : ViewModel() {
         saveDevices()
         if (_selectedDevice.value?.id == device.id) { _selectedDevice.value = newDevice }
         _statusMessage.value = "已更新备注: $note"
+    }
+
+    // ===== selectDevice 支持 null =====
+    fun selectDevice(device: DeviceInfo?) {
+        _selectedDevice.value = device
+        if (device != null) {
+            _statusMessage.value = "已选择: ${device.ip}"
+            Log.d("Tether", "selectDevice: ${device.ip}")
+        }
     }
 
     private fun getLocalIpBase(): String {
@@ -723,12 +788,6 @@ class TetherViewModel : ViewModel() {
         saveDevices()
         _selectedDevice.value = display
         _statusMessage.value = "已添加设备: $ip"
-    }
-
-    fun selectDevice(device: DeviceInfo) {
-        Log.d("Tether", "selectDevice: ${device.ip}")
-        _selectedDevice.value = device
-        _statusMessage.value = "已选择: ${device.ip}"
     }
 
     fun sendCommand(command: String) {

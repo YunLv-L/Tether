@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -11,24 +12,25 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tether.controller.IdentityManager.PeerInfo
 import com.tether.controller.ui.theme.TetherTheme
-import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
-    
+
     // ===== IdentityManager (新架构) =====
     private lateinit var identityManager: IdentityManager
-    
+
     // ===== Shizuku 权限请求状态 =====
     private var shizukuPermissionRequested = false
 
@@ -106,7 +108,6 @@ class MainActivity : ComponentActivity() {
 
         if (!ShizukuManager.isAvailable()) {
             android.util.Log.d("Tether", "⚠️ Shizuku 服务不可用，请先启动 Shizuku")
-            // 可以在这里显示一个 Toast 或通知
             return
         }
 
@@ -121,12 +122,9 @@ class MainActivity : ComponentActivity() {
         ShizukuManager.requestPermission { granted ->
             if (granted) {
                 android.util.Log.d("Tether", "✅ Shizuku 权限授权成功")
-                // 权限授予后，可以触发高权限扫描
-                // viewModel.shizukuScan() 会在 UI 中按需调用
             } else {
                 android.util.Log.d("Tether", "❌ Shizuku 权限被拒绝")
                 shizukuPermissionRequested = false
-                // 用户拒绝后，可以提示降级方案
             }
         }
     }
@@ -140,7 +138,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // 每次返回前台时，检查是否需要重新申请权限
-        // (用户可能在设置中关闭了权限)
         if (!ShizukuManager.isGranted() && ShizukuManager.isAvailable()) {
             shizukuPermissionRequested = false
             tryRequestShizukuPermission()
@@ -160,8 +157,9 @@ fun TetherApp(
     // ===== 使用 IdentityManager 的设备列表 =====
     val verifiedPeers by identityManager.verifiedPeers.collectAsState()
     val cachedPeers by identityManager.peers.collectAsState()
-    
+
     // ===== 兼容旧 ViewModel 状态 =====
+    val devices by viewModel.devices.collectAsState()
     val selectedDevice by viewModel.selectedDevice.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
@@ -173,53 +171,13 @@ fun TetherApp(
     val context = LocalContext.current
 
     // ===== 对话框状态 =====
-    var showDeleteDialog by remember { mutableStateOf<PeerInfo?>(null) }
-    var showEditDialog by remember { mutableStateOf<PeerInfo?>(null) }
-    var showNoteDialog by remember { mutableStateOf<PeerInfo?>(null) }
+    var showDeleteDialog by remember { mutableStateOf<DeviceInfo?>(null) }
+    var showEditDialog by remember { mutableStateOf<DeviceInfo?>(null) }
+    var showNoteDialog by remember { mutableStateOf<DeviceInfo?>(null) }
 
     // ===== Debug 模式触发 =====
     var headerClickCount by remember { mutableStateOf(0) }
     var headerClickStartTime by remember { mutableStateOf(0L) }
-
-    // ===== 将 PeerInfo 转换为 DeviceInfo (兼容旧 UI) =====
-    val devices = remember(verifiedPeers, cachedPeers) {
-        // 优先显示已验证设备，再显示缓存设备
-        val verifiedList = verifiedPeers.map { peer ->
-            DeviceInfo(
-                id = peer.machineCode,
-                ip = peer.ip,
-                name = peer.deviceName,
-                isManual = false,
-                note = if (peer.isVerified) "✅ 已验证" else "",
-                isOnline = peer.isOnline,
-                machineCode = peer.machineCode
-            )
-        }
-        
-        val cachedList = cachedPeers
-            .filter { cached -> !verifiedPeers.any { it.machineCode == cached.machineCode } }
-            .map { peer ->
-                DeviceInfo(
-                    id = peer.machineCode,
-                    ip = peer.ip,
-                    name = peer.deviceName,
-                    isManual = false,
-                    note = "⏳ 发现中...",
-                    isOnline = false,
-                    machineCode = peer.machineCode
-                )
-            }
-        
-        verifiedList + cachedList
-    }
-
-    // ===== 选中设备同步 =====
-    LaunchedEffect(devices) {
-        if (selectedDevice != null && devices.none { it.id == selectedDevice?.id }) {
-            // 如果选中的设备不在列表中，取消选中
-            viewModel.selectDevice(null)
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -261,11 +219,12 @@ fun TetherApp(
                             )
                         }
                         // 显示在线设备数量
+                        val onlineCount = verifiedPeers.count { it.isOnline }
                         AssistChip(
                             onClick = {},
                             label = {
                                 Text(
-                                    "${verifiedPeers.count { it.isOnline }} 台在线",
+                                    "$onlineCount 台在线",
                                     fontSize = MaterialTheme.typography.labelSmall.fontSize
                                 )
                             },
@@ -274,7 +233,7 @@ fun TetherApp(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { /* 手动刷新 */ }) {
+                    IconButton(onClick = { viewModel.startHybridDiscovery() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
                     }
                 },
@@ -403,21 +362,7 @@ fun TetherApp(
                                 .fillMaxWidth()
                                 .combinedClickable(
                                     onLongClick = {
-                                        // 转换为 PeerInfo 以便操作
-                                        val peer = verifiedPeers.find { it.machineCode == device.machineCode }
-                                        if (peer != null) {
-                                            showDeleteDialog = peer
-                                        } else {
-                                            // 如果是未验证设备，提供删除选项
-                                            showDeleteDialog = PeerInfo(
-                                                machineCode = device.machineCode,
-                                                ip = device.ip,
-                                                deviceName = device.name,
-                                                isOnline = device.isOnline,
-                                                isVerified = device.note.contains("已验证"),
-                                                lastSeen = System.currentTimeMillis()
-                                            )
-                                        }
+                                        showDeleteDialog = device
                                     },
                                     onClick = {
                                         android.util.Log.d("Tether", "点击设备: ${device.ip}")
@@ -540,10 +485,9 @@ fun TetherApp(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(if (ShizukuManager.canUseHighPrivilege()) "Shizuku 扫描" else "Shizuku 不可用")
                 }
-                
+
                 OutlinedButton(
                     onClick = {
-                        // 强制重新申请 Shizuku 权限
                         ShizukuManager.requestPermission { granted ->
                             android.util.Log.d("Tether", "Shizuku 重新授权: $granted")
                         }
@@ -556,6 +500,27 @@ fun TetherApp(
                 ) {
                     Text("🔑 授权")
                 }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // ===== 深度扫描按钮 =====
+            OutlinedButton(
+                onClick = { viewModel.deepScan() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("深度扫描（兜底）")
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -697,7 +662,6 @@ fun TetherApp(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
-                        // 显示 IdentityManager 状态
                         Text(
                             text = "📡 已验证: ${verifiedPeers.size} | 缓存: ${cachedPeers.size}",
                             style = MaterialTheme.typography.bodySmall,
@@ -712,27 +676,17 @@ fun TetherApp(
 
     // ===== 长按菜单对话框 =====
     if (showDeleteDialog != null) {
-        val peer = showDeleteDialog!!
+        val device = showDeleteDialog!!
         AlertDialog(
             onDismissRequest = { showDeleteDialog = null },
             title = { Text("设备操作") },
-            text = { Text("${peer.ip} (${peer.deviceName})") },
+            text = { Text("${device.ip} (${device.getDisplayName()})") },
             confirmButton = {
                 Column {
                     TextButton(
                         onClick = {
                             showDeleteDialog = null
-                            // 编辑 IP (需要转换为 DeviceInfo)
-                            val device = DeviceInfo(
-                                id = peer.machineCode,
-                                ip = peer.ip,
-                                name = peer.deviceName,
-                                isManual = false,
-                                note = if (peer.isVerified) "已验证" else "",
-                                isOnline = peer.isOnline,
-                                machineCode = peer.machineCode
-                            )
-                            showEditDialog = peer
+                            showEditDialog = device
                         }
                     ) {
                         Text("✏️ 编辑 IP")
@@ -740,25 +694,14 @@ fun TetherApp(
                     TextButton(
                         onClick = {
                             showDeleteDialog = null
-                            showNoteDialog = peer
+                            showNoteDialog = device
                         }
                     ) {
                         Text("📝 编辑备注")
                     }
                     TextButton(
                         onClick = {
-                            // 从设备列表中移除
-                            viewModel.deleteDevice(
-                                DeviceInfo(
-                                    id = peer.machineCode,
-                                    ip = peer.ip,
-                                    name = peer.deviceName,
-                                    isManual = false,
-                                    note = "",
-                                    isOnline = peer.isOnline,
-                                    machineCode = peer.machineCode
-                                )
-                            )
+                            viewModel.deleteDevice(device)
                             showDeleteDialog = null
                         }
                     ) {
@@ -776,8 +719,8 @@ fun TetherApp(
 
     // ===== 编辑 IP 对话框 =====
     if (showEditDialog != null) {
-        val peer = showEditDialog!!
-        var newIp by remember { mutableStateOf(peer.ip) }
+        val device = showEditDialog!!
+        var newIp by remember { mutableStateOf(device.ip) }
         AlertDialog(
             onDismissRequest = { showEditDialog = null },
             title = { Text("编辑 IP") },
@@ -793,16 +736,6 @@ fun TetherApp(
                 TextButton(
                     onClick = {
                         if (newIp.isNotBlank()) {
-                            // 通知 ViewModel 更新
-                            val device = DeviceInfo(
-                                id = peer.machineCode,
-                                ip = peer.ip,
-                                name = peer.deviceName,
-                                isManual = false,
-                                note = if (peer.isVerified) "已验证" else "",
-                                isOnline = peer.isOnline,
-                                machineCode = peer.machineCode
-                            )
                             viewModel.editDeviceIp(device, newIp)
                             showEditDialog = null
                         }
@@ -821,8 +754,8 @@ fun TetherApp(
 
     // ===== 编辑备注对话框 =====
     if (showNoteDialog != null) {
-        val peer = showNoteDialog!!
-        var newNote by remember { mutableStateOf(peer.deviceName) }
+        val device = showNoteDialog!!
+        var newNote by remember { mutableStateOf(device.note) }
         AlertDialog(
             onDismissRequest = { showNoteDialog = null },
             title = { Text("设备备注") },
@@ -838,16 +771,6 @@ fun TetherApp(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        // 保存备注 (通过 ViewModel)
-                        val device = DeviceInfo(
-                            id = peer.machineCode,
-                            ip = peer.ip,
-                            name = peer.deviceName,
-                            isManual = false,
-                            note = newNote,
-                            isOnline = peer.isOnline,
-                            machineCode = peer.machineCode
-                        )
                         viewModel.updateDeviceNote(device, newNote)
                         showNoteDialog = null
                     }
@@ -881,27 +804,15 @@ fun ShizukuStatusRow() {
         // 状态指示灯
         val statusColor = when {
             !shizukuAvailable -> MaterialTheme.colorScheme.error
-            !shizukuGranted -> MaterialTheme.colorScheme.warning
-            !shellReady -> MaterialTheme.colorScheme.warning
+            !shizukuGranted -> MaterialTheme.colorScheme.tertiary
+            !shellReady -> MaterialTheme.colorScheme.tertiary
             else -> MaterialTheme.colorScheme.primary
         }
-        
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .then(
-                    if (statusColor == MaterialTheme.colorScheme.primary)
-                        Modifier
-                    else
-                        Modifier
-                )
+
+        Canvas(
+            modifier = Modifier.size(10.dp)
         ) {
-            // 圆点
-            androidx.compose.foundation.Canvas(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                drawCircle(color = statusColor)
-            }
+            drawCircle(color = statusColor)
         }
 
         val statusText = when {
@@ -917,8 +828,7 @@ fun ShizukuStatusRow() {
             color = statusColor,
             modifier = Modifier.weight(1f)
         )
-        
-        // 显示 Shell 服务状态 (Debug)
+
         if (shizukuGranted && shellReady) {
             Text(
                 text = "🔧 Shell 已就绪",
@@ -928,15 +838,3 @@ fun ShizukuStatusRow() {
         }
     }
 }
-
-// ============================================================
-//  PeerInfo 扩展 (用于对话框)
-// ============================================================
-data class PeerInfo(
-    val machineCode: String,
-    val ip: String,
-    val deviceName: String,
-    val isOnline: Boolean,
-    val isVerified: Boolean,
-    val lastSeen: Long
-)
