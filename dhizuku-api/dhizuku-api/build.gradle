@@ -1,5 +1,5 @@
 plugins {
-    alias(libs.plugins.agp.lib)
+    id('com.android.library')
     id('maven-publish')
     id('signing')
 }
@@ -12,11 +12,11 @@ if (publishingFile.exists()) {
 
 android {
     namespace = 'com.rosan.dhizuku.api'
-    compileSdk = TARGET_SDK
+    compileSdk = 34
 
     defaultConfig {
-        minSdk = MIN_SDK
-        targetSdk = TARGET_SDK
+        minSdk = 24
+        targetSdk = 34
     }
 
     buildFeatures {
@@ -25,8 +25,8 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_21
-        targetCompatibility JavaVersion.VERSION_21
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     publishing {
@@ -38,8 +38,8 @@ android {
 }
 
 dependencies {
-    compileOnly(libs.annotation)
-    compileOnly(libs.core)
+    compileOnly("androidx.annotation:annotation:1.10.0")
+    compileOnly("androidx.core:core:1.19.0")
     compileOnly project(':hidden-api')
 }
 
@@ -50,29 +50,29 @@ publishing {
                 from components.findByName('release')
             }
 
-            group = publishingProps['groupId']
-            artifactId = publishingProps['api.artifactId']
-            version = API_VERSION
+            group = "io.github.iamr0s"
+            artifactId = "Dhizuku-API"
+            version = "1.0.0-local"
 
             pom {
-                name = publishingProps['pom.name']
-                description = publishingProps['pom.description']
-                inceptionYear = publishingProps['pom.inceptionYear']
-                url = publishingProps['pom.url']
+                name = "Dhizuku API"
+                description = "API of Dhizuku"
+                inceptionYear = "2023"
+                url = "https://github.com/iamr0s/Dhizuku-API"
                 scm {
-                    url = publishingProps['pom.scmUrl']
-                    connection = publishingProps['pom.scmConnection']
+                    url = "https://github.com/iamr0s/Dhizuku-API"
+                    connection = "scm:git:git://github.com/iamr0s/Dhizuku-API.git"
                 }
                 licenses {
                     license {
-                        name = publishingProps['pom.licenceName']
-                        url = publishingProps['pom.licenceUrl']
+                        name = "MIT License"
+                        url = "https://opensource.org/licenses/MIT"
                     }
                 }
                 developers {
                     developer {
-                        name = publishingProps['pom.developerName']
-                        url = publishingProps['pom.developerUrl']
+                        name = "iamr0s"
+                        url = "https://github.com/iamr0s"
                     }
                 }
             }
