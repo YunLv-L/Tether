@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'app/**'
+      - 'dhizuku-api/**'
       - '.github/workflows/build-tether.yml'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
