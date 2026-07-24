@@ -31,8 +31,7 @@
 
                 <!-- 标题栏 -->
                 <Grid Grid.Row="0"
-                      Background="{DynamicResource MaterialDesignCardBackground}"
-                      CornerRadius="16,16,0,0">
+                      Background="{DynamicResource MaterialDesignCardBackground}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
@@ -217,7 +216,6 @@
                 <!-- 底部按钮 -->
                 <Grid Grid.Row="3"
                       Background="{DynamicResource MaterialDesignCardBackground}"
-                      CornerRadius="0,0,16,16"
                       Padding="16,12,16,12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
