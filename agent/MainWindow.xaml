@@ -15,208 +15,207 @@
                       ResizeBorderThickness="6"/>
     </WindowChrome.WindowChrome>
 
-    <Grid>
-        <Border Background="{DynamicResource MaterialDesignBackground}"
-                CornerRadius="16"
-                BorderBrush="{DynamicResource MaterialDesignDivider}"
-                BorderThickness="1">
+    <Border Background="{DynamicResource MaterialDesignBackground}"
+            CornerRadius="16"
+            BorderBrush="{DynamicResource MaterialDesignDivider}"
+            BorderThickness="1">
 
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="56"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="56"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-                <!-- 标题栏 -->
-                <Grid Grid.Row="0"
-                      Background="{DynamicResource MaterialDesignCardBackground}">
+            <!-- 标题栏 -->
+            <Grid Grid.Row="0"
+                  Background="{DynamicResource MaterialDesignCardBackground}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal"
+                            Margin="16,0,0,0"
+                            VerticalAlignment="Center">
+                    <materialDesign:PackIcon Kind="Link"
+                                              Width="24"
+                                              Height="24"
+                                              Foreground="{DynamicResource MaterialDesignBody}"
+                                              Margin="0,0,12,0"/>
+                    <TextBlock Text="Tether"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource MaterialDesignBody}"/>
+                    <Border Background="{DynamicResource PrimaryHueMidBrush}"
+                            CornerRadius="12"
+                            Padding="8,2,8,2"
+                            Margin="12,0,0,0">
+                        <TextBlock Text="Agent"
+                                   FontSize="10"
+                                   FontWeight="Bold"
+                                   Foreground="White"/>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            Margin="0,0,12,0">
+                    <Button x:Name="MinimizeButton"
+                            Style="{DynamicResource MaterialDesignFlatButton}"
+                            Width="30"
+                            Height="30"
+                            Click="MinimizeButton_Click"
+                            ToolTip="最小化">
+                        <materialDesign:PackIcon Kind="WindowMinimize"
+                                                  Width="18"
+                                                  Height="18"/>
+                    </Button>
+                    <Button x:Name="MaximizeButton"
+                            Style="{DynamicResource MaterialDesignFlatButton}"
+                            Width="30"
+                            Height="30"
+                            Click="MaximizeButton_Click"
+                            ToolTip="最大化">
+                        <materialDesign:PackIcon Kind="WindowMaximize"
+                                                  Width="18"
+                                                  Height="18"/>
+                    </Button>
+                    <Button x:Name="CloseButton"
+                            Style="{DynamicResource MaterialDesignFlatButton}"
+                            Width="30"
+                            Height="30"
+                            Click="CloseButton_Click"
+                            ToolTip="关闭">
+                        <materialDesign:PackIcon Kind="WindowClose"
+                                                  Width="18"
+                                                  Height="18"/>
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <!-- 信息卡片 -->
+            <Border Grid.Row="1"
+                    Background="{DynamicResource MaterialDesignCardBackground}"
+                    CornerRadius="12"
+                    Margin="16,12,16,8"
+                    Padding="16,12,16,12"
+                    BorderBrush="{DynamicResource MaterialDesignDivider}"
+                    BorderThickness="1">
+                <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Orientation="Horizontal"
-                                Margin="16,0,0,0"
-                                VerticalAlignment="Center">
-                        <materialDesign:PackIcon Kind="Link"
-                                                  Width="24"
-                                                  Height="24"
-                                                  Foreground="{DynamicResource MaterialDesignBody}"
-                                                  Margin="0,0,12,0"/>
-                        <TextBlock Text="Tether"
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="💻 设备"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+                        <TextBlock x:Name="DeviceNameText"
+                                   Text="未知"
                                    FontSize="18"
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource MaterialDesignBody}"/>
-                        <Border Background="{DynamicResource PrimaryHueMidBrush}"
-                                CornerRadius="12"
-                                Padding="8,2,8,2"
-                                Margin="12,0,0,0">
-                            <TextBlock Text="Agent"
-                                       FontSize="10"
-                                       FontWeight="Bold"
-                                       Foreground="White"/>
-                        </Border>
+                        <TextBlock x:Name="StatusText"
+                                   Text="● 运行中"
+                                   FontSize="13"
+                                   Foreground="#4CAF50"/>
                     </StackPanel>
 
-                    <!-- 窗口按钮 -->
-                    <StackPanel Grid.Column="2"
-                                Orientation="Horizontal"
-                                Margin="0,0,12,0">
-                        <Button x:Name="MinimizeButton"
-                                Style="{DynamicResource MaterialDesignFlatButton}"
-                                Width="30"
-                                Height="30"
-                                Click="MinimizeButton_Click"
-                                ToolTip="最小化">
-                            <materialDesign:PackIcon Kind="WindowMinimize"
-                                                      Width="18"
-                                                      Height="18"/>
-                        </Button>
-                        <Button x:Name="MaximizeButton"
-                                Style="{DynamicResource MaterialDesignFlatButton}"
-                                Width="30"
-                                Height="30"
-                                Click="MaximizeButton_Click"
-                                ToolTip="最大化">
-                            <materialDesign:PackIcon Kind="WindowMaximize"
-                                                      Width="18"
-                                                      Height="18"/>
-                        </Button>
-                        <Button x:Name="CloseButton"
-                                Style="{DynamicResource MaterialDesignFlatButton}"
-                                Width="30"
-                                Height="30"
-                                Click="CloseButton_Click"
-                                ToolTip="关闭">
-                            <materialDesign:PackIcon Kind="WindowClose"
-                                                      Width="18"
-                                                      Height="18"/>
-                        </Button>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="🌐 IP"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+                        <TextBlock x:Name="IpText"
+                                   Text="未知"
+                                   FontSize="18"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PrimaryHueMidBrush}"/>
+                        <TextBlock x:Name="OnlineCountText"
+                                   Text="0 台在线"
+                                   FontSize="13"
+                                   Foreground="{DynamicResource MaterialDesignBodyLight}"/>
                     </StackPanel>
+
+                    <materialDesign:PackIcon Kind="Wifi"
+                                              Width="32"
+                                              Height="32"
+                                              Foreground="{DynamicResource PrimaryHueMidBrush}"
+                                              Grid.Column="2"
+                                              Margin="8,0,0,0"/>
                 </Grid>
+            </Border>
 
-                <!-- 信息卡片 -->
-                <Border Grid.Row="1"
-                        Background="{DynamicResource MaterialDesignCardBackground}"
-                        CornerRadius="12"
-                        Margin="16,12,16,8"
-                        Padding="16,12,16,12"
-                        BorderBrush="{DynamicResource MaterialDesignDivider}"
-                        BorderThickness="1">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
+            <!-- 设备列表 -->
+            <Grid Grid.Row="2"
+                  Margin="16,0,16,8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
 
-                        <StackPanel Grid.Column="0">
-                            <TextBlock Text="💻 设备"
-                                       FontSize="12"
-                                       Foreground="{DynamicResource MaterialDesignBodyLight}"/>
-                            <TextBlock x:Name="DeviceNameText"
-                                       Text="未知"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource MaterialDesignBody}"/>
-                            <TextBlock x:Name="StatusText"
-                                       Text="● 运行中"
-                                       FontSize="13"
-                                       Foreground="#4CAF50"/>
-                        </StackPanel>
+                <TextBlock Text="📡 发现的设备"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource MaterialDesignBody}"
+                           Margin="0,0,0,8"/>
 
-                        <StackPanel Grid.Column="1">
-                            <TextBlock Text="🌐 IP"
-                                       FontSize="12"
-                                       Foreground="{DynamicResource MaterialDesignBodyLight}"/>
-                            <TextBlock x:Name="IpText"
-                                       Text="未知"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource PrimaryHueMidBrush}"/>
-                            <TextBlock x:Name="OnlineCountText"
-                                       Text="0 台在线"
-                                       FontSize="13"
-                                       Foreground="{DynamicResource MaterialDesignBodyLight}"/>
-                        </StackPanel>
+                <ListBox x:Name="DeviceList"
+                         Grid.Row="1"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         ItemContainerStyle="{DynamicResource MaterialDesignListBoxItem}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="{DynamicResource MaterialDesignCardBackground}"
+                                    CornerRadius="10"
+                                    Padding="12,10,12,10"
+                                    Margin="0,2,0,2"
+                                    BorderBrush="{DynamicResource MaterialDesignDivider}"
+                                    BorderThickness="0,0,0,1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
 
-                        <materialDesign:PackIcon Kind="Wifi"
-                                                  Width="32"
-                                                  Height="32"
-                                                  Foreground="{DynamicResource PrimaryHueMidBrush}"
-                                                  Grid.Column="2"
-                                                  Margin="8,0,0,0"/>
-                    </Grid>
-                </Border>
+                                    <Ellipse Width="10"
+                                             Height="10"
+                                             Fill="#4CAF50"
+                                             Grid.Column="0"
+                                             Margin="0,0,12,0"/>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontSize="14"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource MaterialDesignBody}"/>
+                                        <TextBlock Text="{Binding Ip}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+                                    </StackPanel>
+                                    <materialDesign:PackIcon Kind="CheckCircle"
+                                                              Width="20"
+                                                              Height="20"
+                                                              Foreground="{DynamicResource PrimaryHueMidBrush}"
+                                                              Grid.Column="2"
+                                                              Visibility="Collapsed"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
 
-                <!-- 设备列表 -->
-                <Grid Grid.Row="2"
-                      Margin="16,0,16,8">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-
-                    <TextBlock Text="📡 发现的设备"
-                               FontSize="14"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource MaterialDesignBody}"
-                               Margin="0,0,0,8"/>
-
-                    <ListBox x:Name="DeviceList"
-                             Grid.Row="1"
-                             Background="Transparent"
-                             BorderThickness="0"
-                             ItemContainerStyle="{StaticResource MaterialDesignListBoxItem}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Border Background="{DynamicResource MaterialDesignCardBackground}"
-                                        CornerRadius="10"
-                                        Padding="12,10,12,10"
-                                        Margin="0,2,0,2"
-                                        BorderBrush="{DynamicResource MaterialDesignDivider}"
-                                        BorderThickness="0,0,0,1">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-
-                                        <Ellipse Width="10"
-                                                 Height="10"
-                                                 Fill="#4CAF50"
-                                                 Grid.Column="0"
-                                                 Margin="0,0,12,0"/>
-                                        <StackPanel Grid.Column="1">
-                                            <TextBlock Text="{Binding Name}"
-                                                       FontSize="14"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{DynamicResource MaterialDesignBody}"/>
-                                            <TextBlock Text="{Binding Ip}"
-                                                       FontSize="12"
-                                                       Foreground="{DynamicResource MaterialDesignBodyLight}"/>
-                                        </StackPanel>
-                                        <materialDesign:PackIcon Kind="CheckCircle"
-                                                                  Width="20"
-                                                                  Height="20"
-                                                                  Foreground="{DynamicResource PrimaryHueMidBrush}"
-                                                                  Grid.Column="2"
-                                                                  Visibility="Collapsed"/>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </Grid>
-
-                <!-- 底部按钮 -->
-                <Grid Grid.Row="3"
-                      Background="{DynamicResource MaterialDesignCardBackground}"
-                      Padding="16,12,16,12">
+            <!-- 底部操作栏 -->
+            <Border Grid.Row="3"
+                    Background="{DynamicResource MaterialDesignCardBackground}"
+                    Padding="16,12,16,12">
+                <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
@@ -255,7 +254,7 @@
                                 Click="ShutdownButton_Click"/>
                     </StackPanel>
                 </Grid>
-            </Grid>
-        </Border>
-    </Grid>
+            </Border>
+        </Grid>
+    </Border>
 </Window>
