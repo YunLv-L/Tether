@@ -12,8 +12,7 @@
 
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="48"
-                      ResizeBorderThickness="6"
-                      CornerRadius="16"/>
+                      ResizeBorderThickness="6"/>
     </WindowChrome.WindowChrome>
 
     <Grid>
