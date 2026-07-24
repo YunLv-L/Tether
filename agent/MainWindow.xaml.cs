@@ -6,7 +6,9 @@ namespace TetherAgent;
 
 public partial class MainWindow : Window
 {
-    private IdentityService? _identityService;
+    // 临时占位：IdentityService 将在后续实现
+    // private IdentityService? _identityService;
+    private object? _identityServicePlaceholder;
 
     public MainWindow()
     {
@@ -16,6 +18,8 @@ public partial class MainWindow : Window
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        // 临时注释：等待 IdentityService 实现
+        /*
         _identityService = new IdentityService();
         _identityService.OnDeviceFound += (device) =>
         {
@@ -26,6 +30,7 @@ public partial class MainWindow : Window
             });
         };
         _identityService.Start();
+        */
 
         DeviceNameText.Text = Environment.MachineName;
         IpText.Text = GetLocalIP();
@@ -55,16 +60,24 @@ public partial class MainWindow : Window
         => Close();
 
     private void ScanButton_Click(object sender, RoutedEventArgs e)
-        => _identityService?.BroadcastDiscovery();
+    {
+        // _identityService?.BroadcastDiscovery();
+    }
 
     private void LockButton_Click(object sender, RoutedEventArgs e)
-        => _identityService?.SendCommand("lock");
+    {
+        // _identityService?.SendCommand("lock");
+    }
 
     private void SleepButton_Click(object sender, RoutedEventArgs e)
-        => _identityService?.SendCommand("sleep");
+    {
+        // _identityService?.SendCommand("sleep");
+    }
 
     private void ShutdownButton_Click(object sender, RoutedEventArgs e)
-        => _identityService?.SendCommand("shutdown");
+    {
+        // _identityService?.SendCommand("shutdown");
+    }
 
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
