@@ -28,29 +28,20 @@ import com.tether.controller.ui.theme.TetherTheme
 
 class MainActivity : ComponentActivity() {
 
-    // ===== IdentityManager (新架构) =====
     private lateinit var identityManager: IdentityManager
-
-    // ===== Shizuku 权限请求状态 =====
     private var shizukuPermissionRequested = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // ============================================================
-        // 1️⃣ 初始化 IdentityManager (新架构)
-        // ============================================================
+        // 1️⃣ IdentityManager
         identityManager = IdentityManager(applicationContext)
         identityManager.start()
 
-        // ============================================================
-        // 2️⃣ 初始化所有权限通道 (Shizuku + Dhizuku)
-        // ============================================================
+        // 2️⃣ 权限通道
         CommandExecutor.init(applicationContext)
 
-        // ============================================================
-        // 3️⃣ 启动时自动申请 Shizuku 权限
-        // ============================================================
+        // 3️⃣ Shizuku 自动授权
         requestShizukuPermissionOnStart()
 
         setContent {
@@ -68,51 +59,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ============================================================
-    //  🚀 启动时自动申请 Shizuku 权限
-    // ============================================================
     private fun requestShizukuPermissionOnStart() {
-        // 检查 Shizuku 是否可用
         if (!ShizukuManager.isAvailable()) {
-            android.util.Log.d("Tether", "⏳ Shizuku 服务未启动，等待 2 秒后重试...")
             android.os.Handler(mainLooper).postDelayed({
                 tryRequestShizukuPermission()
             }, 2000)
             return
         }
-
         if (ShizukuManager.isGranted()) {
             android.util.Log.d("Tether", "✅ Shizuku 权限已授权")
             return
         }
-
-        if (ShizukuManager.canUseHighPrivilege()) {
-            android.util.Log.d("Tether", "✅ Shizuku 高权限可用")
-            return
-        }
-
         tryRequestShizukuPermission()
     }
 
     private fun tryRequestShizukuPermission() {
-        if (shizukuPermissionRequested) {
-            android.util.Log.d("Tether", "⏳ Shizuku 权限已请求过，等待用户响应...")
-            return
-        }
+        if (shizukuPermissionRequested) return
+        if (!ShizukuManager.isAvailable()) return
+        if (ShizukuManager.isGranted()) return
 
-        if (!ShizukuManager.isAvailable()) {
-            android.util.Log.d("Tether", "⚠️ Shizuku 服务不可用，请先启动 Shizuku")
-            return
-        }
-
-        if (ShizukuManager.isGranted()) {
-            android.util.Log.d("Tether", "✅ Shizuku 权限已授权")
-            return
-        }
-
-        android.util.Log.d("Tether", "🚀 启动时自动申请 Shizuku 权限...")
         shizukuPermissionRequested = true
-
         ShizukuManager.requestPermission { granted ->
             if (granted) {
                 android.util.Log.d("Tether", "✅ Shizuku 权限授权成功")
@@ -285,7 +251,7 @@ fun TetherApp(
             }
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ===== 权限状态行 =====
+            // ===== 权限状态 =====
             PermissionStatusRow()
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -774,7 +740,7 @@ fun TetherApp(
 }
 
 // ============================================================
-//  权限状态行 (Shizuku + Dhizuku)
+//  权限状态行
 // ============================================================
 @Composable
 fun PermissionStatusRow() {
@@ -790,18 +756,14 @@ fun PermissionStatusRow() {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // ===== Shizuku 状态 =====
+        // Shizuku
         val shizukuColor = when {
             !shizukuAvailable -> MaterialTheme.colorScheme.error
             !shizukuGranted -> MaterialTheme.colorScheme.tertiary
             !shellReady -> MaterialTheme.colorScheme.tertiary
             else -> MaterialTheme.colorScheme.primary
         }
-
-        Canvas(modifier = Modifier.size(8.dp)) {
-            drawCircle(color = shizukuColor)
-        }
-
+        Canvas(modifier = Modifier.size(8.dp)) { drawCircle(color = shizukuColor) }
         Text(
             text = when {
                 !shizukuAvailable -> "Shizuku: 未启动"
@@ -814,17 +776,13 @@ fun PermissionStatusRow() {
             modifier = Modifier.weight(1f)
         )
 
-        // ===== Dhizuku 状态 =====
+        // Dhizuku
         val dhizukuColor = when {
             !dhizukuAvailable -> MaterialTheme.colorScheme.error
             !dhizukuGranted -> MaterialTheme.colorScheme.tertiary
             else -> MaterialTheme.colorScheme.primary
         }
-
-        Canvas(modifier = Modifier.size(8.dp)) {
-            drawCircle(color = dhizukuColor)
-        }
-
+        Canvas(modifier = Modifier.size(8.dp)) { drawCircle(color = dhizukuColor) }
         Text(
             text = when {
                 !dhizukuAvailable -> "Dhizuku: 不可用"

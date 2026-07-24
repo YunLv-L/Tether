@@ -1,0 +1,38 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 深色主题自定义颜色 -->
+    <SolidColorBrush x:Key="PrimaryBackground" Color="#1A1A2E"/>
+    <SolidColorBrush x:Key="SecondaryBackground" Color="#16213E"/>
+    <SolidColorBrush x:Key="CardBackground" Color="#1E2A47"/>
+    <SolidColorBrush x:Key="SurfaceBackground" Color="#0F0F1F"/>
+    <SolidColorBrush x:Key="PrimaryText" Color="#E8E8F0"/>
+    <SolidColorBrush x:Key="SecondaryText" Color="#9A9ABF"/>
+    <SolidColorBrush x:Key="Divider" Color="#2A2A4A"/>
+    <SolidColorBrush x:Key="HoverBackground" Color="#2A3A5A"/>
+    <SolidColorBrush x:Key="AccentColor" Color="#4A9EFF"/>
+    <SolidColorBrush x:Key="SuccessColor" Color="#4CAF50"/>
+    <SolidColorBrush x:Key="ErrorColor" Color="#EF5350"/>
+    <SolidColorBrush x:Key="WarningColor" Color="#FFC107"/>
+
+    <!-- 控件样式 -->
+    <Style TargetType="Border" x:Key="CardBorder">
+        <Setter Property="Background" Value="{StaticResource CardBackground}"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="16"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Divider}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+
+    <Style TargetType="TextBlock" x:Key="TitleText">
+        <Setter Property="Foreground" Value="{StaticResource PrimaryText}"/>
+        <Setter Property="FontSize" Value="18"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style TargetType="TextBlock" x:Key="SubtitleText">
+        <Setter Property="Foreground" Value="{StaticResource SecondaryText}"/>
+        <Setter Property="FontSize" Value="13"/>
+    </Style>
+
+</ResourceDictionary>

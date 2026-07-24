@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.OutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.Inet4Address
@@ -71,12 +70,8 @@ class TetherViewModel : ViewModel() {
     private var nsdManager: NsdManager? = null
     private var context: Context? = null
     private var mdnsListener: NsdManager.DiscoveryListener? = null
-
     private val udpCache = mutableMapOf<String, DeviceInfo>()
-
-    @Volatile
-    private var isUdpListening = false
-
+    @Volatile private var isUdpListening = false
     private var identityManager: IdentityManager? = null
 
     fun init(context: Context) {
@@ -90,7 +85,6 @@ class TetherViewModel : ViewModel() {
 
     fun setIdentityManager(manager: IdentityManager) {
         this.identityManager = manager
-
         viewModelScope.launch {
             manager.verifiedPeers.collect { peers ->
                 val deviceList = peers.map { peer ->
@@ -108,10 +102,8 @@ class TetherViewModel : ViewModel() {
                 val allDevices = (deviceList + manualDevices).distinctBy { it.id }
                 _devices.value = allDevices
                 saveDevices()
-                Log.d("Tether", "IdentityManager 更新设备: ${allDevices.size} 台")
             }
         }
-
         viewModelScope.launch {
             manager.peers.collect { cachedPeers ->
                 val verifiedIds = _devices.value.map { it.id }.toSet()
@@ -170,14 +162,6 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    fun clearAllDevices() {
-        _devices.value = emptyList()
-        _selectedDevice.value = null
-        udpCache.clear()
-        prefs.edit().clear().apply()
-        _statusMessage.value = "已清除所有设备数据"
-    }
-
     fun toggleDebugMode() {
         _isDebugMode.value = !_isDebugMode.value
         _debugInfo.value = if (_isDebugMode.value) buildDebugInfo() else ""
@@ -216,17 +200,14 @@ class TetherViewModel : ViewModel() {
 
     private fun sendQualityToAgent(level: Int) {
         val device = _selectedDevice.value ?: return
-        val ip = device.ip
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 try {
-                    Socket(ip, qualityPort).use { socket ->
+                    Socket(device.ip, qualityPort).use { socket ->
                         socket.soTimeout = 3000
                         socket.tcpNoDelay = true
-                        val output = socket.getOutputStream()
-                        output.write("RES:$level\n".toByteArray())
-                        output.flush()
-                        Log.d("Tether", "画质指令已发送: RES:$level")
+                        socket.getOutputStream().write("RES:$level\n".toByteArray())
+                        socket.getOutputStream().flush()
                     }
                 } catch (e: Exception) {
                     Log.e("Tether", "画质切换失败", e)
@@ -235,511 +216,243 @@ class TetherViewModel : ViewModel() {
         }
     }
 
-    private fun updateDevicesFromCache() {
-        val now = System.currentTimeMillis()
-        val aliveDevices = udpCache.filter { now - it.value.hashCode() < cacheTimeout }
-        val currentMap = _devices.value.associateBy { it.id }.toMutableMap()
-        aliveDevices.values.forEach { device ->
-            currentMap[device.id] = device.copy(isOnline = true)
-        }
-        _devices.value = currentMap.values.toList()
-        saveDevices()
-    }
-
-    fun startUdpListener() {
-        if (isUdpListening) return
-
-        udpListenerJob = viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                var socket: DatagramSocket? = null
-                try {
-                    socket = DatagramSocket(udpPort).apply {
-                        broadcast = true
-                        reuseAddress = true
-                        soTimeout = 5000
-                    }
-                    val buffer = ByteArray(1024)
-                    val packet = DatagramPacket(buffer, buffer.size)
-
-                    isUdpListening = true
-                    Log.d("Tether", "UDP 监听启动，端口 $udpPort")
-
-                    while (isUdpListening) {
-                        try {
-                            socket.receive(packet)
-                            val message = String(packet.data, 0, packet.length)
-                            val ip = packet.address.hostAddress ?: continue
-
-                            if (message.isNotBlank() && message.startsWith("TETHER_AGENT|")) {
-                                val parts = message.split("|")
-                                if (parts.size >= 3) {
-                                    val deviceName = parts[1]
-                                    val machineCode = if (parts.size >= 4) parts[3] else ""
-                                    val id = if (machineCode.isNotEmpty()) machineCode else "$deviceName|$ip"
-
-                                    val device = DeviceInfo(
-                                        id = id,
-                                        ip = ip,
-                                        name = deviceName,
-                                        isOnline = true,
-                                        machineCode = machineCode
-                                    )
-
-                                    synchronized(udpCache) {
-                                        val existingKey = udpCache.keys.find { key ->
-                                            val existing = udpCache[key]
-                                            existing != null && (existing.id == device.id || existing.ip == device.ip)
-                                        }
-                                        if (existingKey != null) {
-                                            udpCache.remove(existingKey)
-                                        }
-                                        if (udpCache.size >= 50) {
-                                            val oldestKey = udpCache.minByOrNull { it.value.hashCode() }?.key
-                                            oldestKey?.let { udpCache.remove(it) }
-                                        }
-                                        udpCache[id] = device
-                                        updateDevicesFromCache()
-                                    }
-                                    Log.d("Tether", "✅ UDP 发现设备: ${device.ip} (${device.name})")
-                                }
-                            }
-                        } catch (e: SocketTimeoutException) {
-                            synchronized(udpCache) {
-                                val now = System.currentTimeMillis()
-                                val expiredKeys = udpCache.filter { now - it.value.hashCode() > cacheTimeout }.keys
-                                expiredKeys.forEach { udpCache.remove(it) }
-                                if (expiredKeys.isNotEmpty()) {
-                                    updateDevicesFromCache()
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.e("Tether", "UDP 接收异常", e)
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("Tether", "UDP 监听启动失败", e)
-                } finally {
-                    socket?.close()
-                    isUdpListening = false
-                    Log.d("Tether", "UDP 监听已停止")
-                }
-            }
-        }
-    }
-
-    fun stopUdpListener() {
-        isUdpListening = false
-        udpListenerJob?.cancel()
-        udpListenerJob = null
-        Log.d("Tether", "UDP 监听停止请求")
-    }
-
     fun startHybridDiscovery() {
-        if (_isScanning.value) {
-            stopScan()
-            return
-        }
+        if (_isScanning.value) { stopScan(); return }
         _devices.value = emptyList()
         _selectedDevice.value = null
         _isScanning.value = true
         _statusMessage.value = "正在监听设备广播..."
         _scanProgress.value = "0/254"
-
         startUdpListener()
-
         scanJob = viewModelScope.launch {
-            var mdnsFound = false
-
-            try {
-                mdnsFound = performMdnsDiscovery()
-            } catch (e: Exception) {
-                Log.d("Tether", "mDNS 异常: ${e.message}")
-            }
-
+            try { performMdnsDiscovery() } catch (_: Exception) {}
             withContext(Dispatchers.Main) {
                 val onlineCount = _devices.value.count { it.isOnline }
                 _isScanning.value = false
                 _scanProgress.value = "254/254"
-                _statusMessage.value = if (onlineCount > 0) {
-                    "发现 ${onlineCount} 台设备 (广播: UDP + mDNS)"
-                } else {
-                    "未发现设备，请检查 PC Agent 是否运行，或手动输入 IP"
-                }
+                _statusMessage.value = if (onlineCount > 0) "发现 ${onlineCount} 台设备" else "未发现设备"
             }
         }
     }
 
     fun deepScan() {
-        if (_isScanning.value) {
-            _statusMessage.value = "扫描进行中..."
-            return
-        }
+        if (_isScanning.value) { _statusMessage.value = "扫描进行中..."; return }
         _isScanning.value = true
         _statusMessage.value = "深度扫描中..."
         _scanProgress.value = "0/254"
-
         scanJob = viewModelScope.launch {
-            val foundDevices = mutableMapOf<String, DeviceInfo>()
-            performTcpDiscovery(foundDevices)
-
+            performTcpDiscovery()
             withContext(Dispatchers.Main) {
                 val onlineCount = _devices.value.count { it.isOnline }
                 _isScanning.value = false
                 _scanProgress.value = "254/254"
-                _statusMessage.value = if (onlineCount > 0) {
-                    "发现 ${onlineCount} 台设备 (深度扫描)"
-                } else {
-                    "深度扫描未发现设备"
-                }
+                _statusMessage.value = if (onlineCount > 0) "发现 ${onlineCount} 台设备" else "深度扫描未发现设备"
             }
         }
     }
 
-    // ===== Shizuku 高权限扫描（使用 CommandExecutor） =====
     fun shizukuScan() {
         if (!ShizukuManager.canUseHighPrivilege() && !DhizukuManager.isPermissionGranted()) {
             _statusMessage.value = "Shizuku 和 Dhizuku 均不可用"
             return
         }
-
-        if (_isScanning.value) {
-            stopScan()
-            return
-        }
-
+        if (_isScanning.value) { stopScan(); return }
         _devices.value = emptyList()
         _selectedDevice.value = null
         _isScanning.value = true
         _statusMessage.value = "高权限扫描中..."
         _scanProgress.value = "0/254"
-
         scanJob = viewModelScope.launch {
             val baseIp = getLocalIpBase()
-            val total = 254
-            var foundCount = 0
-
-            withContext(Dispatchers.IO) {
-                for (i in 1..total) {
-                    if (!_isScanning.value) break
-                    val ip = "$baseIp.$i"
-
-                    // 使用 CommandExecutor 执行 ping
-                    val pingResult = CommandExecutor.executeCommand("ping -c 1 -W 1 $ip 2>/dev/null && echo alive")
-                    val isAlive = pingResult.contains("alive") || pingResult.contains("1 received")
-
-                    if (isAlive) {
-                        val portResult = CommandExecutor.executeCommand(
-                            "timeout 1 bash -c \"echo >/dev/tcp/$ip/$tcpPort\" 2>/dev/null && echo open"
-                        )
-                        if (portResult.contains("open")) {
-                            val deviceInfo = getDeviceInfoViaCommand(ip)
-                            if (deviceInfo != null) {
-                                foundCount++
-                                val currentMap = _devices.value.associateBy { it.id }.toMutableMap()
-                                currentMap[deviceInfo.id] = deviceInfo
-                                withContext(Dispatchers.Main) {
-                                    _devices.value = currentMap.values.toList()
-                                    _statusMessage.value = "发现设备: ${deviceInfo.ip} (${deviceInfo.name})"
-                                }
-                            }
+            for (i in 1..254) {
+                if (!_isScanning.value) break
+                val ip = "$baseIp.$i"
+                val ping = CommandExecutor.executeCommand("ping -c 1 -W 1 $ip 2>/dev/null && echo alive")
+                if (ping.contains("alive") || ping.contains("1 received")) {
+                    val port = CommandExecutor.executeCommand("timeout 1 bash -c \"echo >/dev/tcp/$ip/$tcpPort\" 2>/dev/null && echo open")
+                    if (port.contains("open")) {
+                        val info = CommandExecutor.executeCommand("echo 'ping' | nc -w 1 $ip $tcpPort 2>/dev/null")
+                        val parts = info.split("|")
+                        val name = if (parts.size >= 2 && parts[1].isNotEmpty()) parts[1] else "PC"
+                        val mc = if (parts.size >= 4) parts[3] else ""
+                        val id = if (mc.isNotEmpty()) mc else "$name|$ip"
+                        val device = DeviceInfo(id = id, ip = ip, name = name, isOnline = true, machineCode = mc)
+                        val current = _devices.value.toMutableList()
+                        if (current.none { it.id == device.id }) {
+                            current.add(device)
+                            _devices.value = current
+                            _statusMessage.value = "发现: $ip ($name)"
                         }
                     }
-
-                    withContext(Dispatchers.Main) {
-                        _scanProgress.value = "$i/254"
-                    }
                 }
+                _scanProgress.value = "$i/254"
             }
-
-            withContext(Dispatchers.Main) {
-                _isScanning.value = false
-                _scanProgress.value = "254/254"
-                _statusMessage.value = if (foundCount > 0) {
-                    "发现 ${foundCount} 台设备 (高权限扫描)"
-                } else {
-                    "未发现设备，请检查 PC Agent 是否运行"
-                }
-            }
+            _isScanning.value = false
+            _scanProgress.value = "254/254"
+            _statusMessage.value = if (_devices.value.isNotEmpty()) "扫描完成" else "未发现设备"
         }
     }
 
-    private suspend fun getDeviceInfoViaCommand(ip: String): DeviceInfo? {
-        return withContext(Dispatchers.IO) {
-            try {
-                val result = CommandExecutor.executeCommand(
-                    "echo 'ping' | timeout 2 bash -c \"cat >/dev/tcp/$ip/$tcpPort\" 2>/dev/null && echo done"
-                )
-                if (result.isNotEmpty()) {
-                    // 尝试通过 nc 获取更多信息
-                    val infoResult = CommandExecutor.executeCommand(
-                        "echo 'ping' | nc -w 1 $ip $tcpPort 2>/dev/null"
-                    )
-                    val parts = infoResult.split("|")
-                    val deviceName = if (parts.size >= 2 && parts[1].isNotEmpty()) parts[1] else "PC"
-                    val machineCode = if (parts.size >= 4) parts[3] else ""
-                    val id = if (machineCode.isNotEmpty()) machineCode else "$deviceName|$ip"
-                    return@withContext DeviceInfo(
-                        id = id,
-                        ip = ip,
-                        name = deviceName,
-                        isOnline = true,
-                        machineCode = machineCode
-                    )
-                }
-            } catch (e: Exception) {
-                Log.d("Tether", "获取设备信息失败: $ip", e)
-            }
-            null
-        }
-    }
-
-    private suspend fun performMdnsDiscovery(): Boolean {
-        val manager = nsdManager ?: return false
-        var found = false
+    private suspend fun performMdnsDiscovery() {
+        val manager = nsdManager ?: return
         var listener: NsdManager.DiscoveryListener? = null
-
         try {
             listener = object : NsdManager.DiscoveryListener {
-                override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                    val ip = serviceInfo.host?.hostAddress ?: return
-                    val name = serviceInfo.serviceName
-                    val machineCode = serviceInfo.attributes?.get("machineCode")?.let { String(it) } ?: ""
-                    val id = if (machineCode.isNotEmpty()) machineCode else "$name|$ip"
-                    val device = DeviceInfo(
-                        id = id,
-                        ip = ip,
-                        name = name,
-                        isOnline = true,
-                        machineCode = machineCode
-                    )
+                override fun onServiceFound(info: NsdServiceInfo) {
+                    val ip = info.host?.hostAddress ?: return
+                    val name = info.serviceName
+                    val mc = info.attributes?.get("machineCode")?.let { String(it) } ?: ""
+                    val id = if (mc.isNotEmpty()) mc else "$name|$ip"
+                    val device = DeviceInfo(id = id, ip = ip, name = name, isOnline = true, machineCode = mc)
                     synchronized(udpCache) {
-                        val existingKey = udpCache.keys.find { key ->
-                            val existing = udpCache[key]
-                            existing != null && (existing.id == device.id || existing.ip == device.ip)
-                        }
-                        if (existingKey != null) {
-                            udpCache.remove(existingKey)
-                        }
-                        if (udpCache.size >= 50) {
-                            val oldestKey = udpCache.minByOrNull { it.value.hashCode() }?.key
-                            oldestKey?.let { udpCache.remove(it) }
-                        }
+                        if (udpCache.size >= 50) udpCache.remove(udpCache.minByOrNull { it.value.hashCode() }?.key)
                         udpCache[id] = device
                         updateDevicesFromCache()
                     }
-                    found = true
-                    _statusMessage.value = "发现设备: $ip:$name (mDNS)"
+                    _statusMessage.value = "发现: $ip:$name (mDNS)"
                 }
-
-                override fun onServiceLost(serviceInfo: NsdServiceInfo) {
-                    val ip = serviceInfo.host?.hostAddress ?: return
-                    val name = serviceInfo.serviceName
-                    val machineCode = serviceInfo.attributes?.get("machineCode")?.let { String(it) } ?: ""
-                    val id = if (machineCode.isNotEmpty()) machineCode else "$name|$ip"
-                    viewModelScope.launch {
-                        val current = _devices.value.toMutableList()
-                        val index = current.indexOfFirst { it.id == id }
-                        if (index >= 0) {
-                            current[index] = current[index].copy(isOnline = false)
-                            _devices.value = current
-                            saveDevices()
-                            _statusMessage.value = "设备离线: $ip:$name"
-                        }
-                    }
-                }
-
-                override fun onDiscoveryStarted(serviceType: String) {
-                    Log.d("Tether", "mDNS 发现已启动: $serviceType")
-                }
-
-                override fun onDiscoveryStopped(service: String) {
-                    Log.d("Tether", "mDNS 发现已停止")
-                }
-
-                override fun onStartDiscoveryFailed(service: String, errorCode: Int) {
-                    Log.d("Tether", "mDNS 启动失败: $errorCode")
-                }
-
-                override fun onStopDiscoveryFailed(service: String, errorCode: Int) {
-                    Log.d("Tether", "mDNS 停止失败: $errorCode")
-                }
+                override fun onServiceLost(info: NsdServiceInfo) {}
+                override fun onDiscoveryStarted(type: String) {}
+                override fun onDiscoveryStopped(service: String) {}
+                override fun onStartDiscoveryFailed(service: String, error: Int) {}
+                override fun onStopDiscoveryFailed(service: String, error: Int) {}
             }
-
             mdnsListener = listener
             manager.discoverServices("_tether._tcp", NsdManager.PROTOCOL_DNS_SD, listener)
-            Log.d("Tether", "mDNS 发现已启动")
-
             delay(6000)
-
-        } catch (e: Exception) {
-            Log.e("Tether", "mDNS 异常", e)
         } finally {
-            try {
-                listener?.let { manager.stopServiceDiscovery(it) }
-                mdnsListener = null
-                Log.d("Tether", "mDNS 发现已停止")
-            } catch (e: Exception) {
-                Log.e("Tether", "停止mDNS失败", e)
-            }
+            try { listener?.let { manager.stopServiceDiscovery(it) } } catch (_: Exception) {}
+            mdnsListener = null
         }
-        return found
     }
 
-    private suspend fun performTcpDiscovery(foundDevices: MutableMap<String, DeviceInfo>) {
+    private suspend fun performTcpDiscovery() {
         val baseIp = getLocalIpBase()
-        val total = 254
-        var foundCount = 0
-
-        Log.d("Tether", "========== TCP 深度扫描开始 ==========")
-        Log.d("Tether", "扫描网段: $baseIp.*")
-
-        withContext(Dispatchers.Main) {
-            _scanProgress.value = "0/254"
-            _statusMessage.value = "深度扫描中..."
-        }
-
-        val batchSize = 10
-        for (batchStart in 1..total step batchSize) {
+        for (i in 1..254) {
             if (!_isScanning.value) break
-            val batchEnd = minOf(batchStart + batchSize - 1, total)
-            val jobs = mutableListOf<Job>()
+            val ip = "$baseIp.$i"
+            try {
+                val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", "echo 'ping' | nc -w 1 $ip $tcpPort 2>/dev/null"))
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.destroy()
+                if (output.isNotEmpty() && output.startsWith("pong")) {
+                    val parts = output.split("|")
+                    val name = if (parts.size >= 2 && parts[1].isNotEmpty()) parts[1] else "PC"
+                    val mc = if (parts.size >= 4) parts[3] else ""
+                    val id = if (mc.isNotEmpty()) mc else "$name|$ip"
+                    val device = DeviceInfo(id = id, ip = ip, name = name, isOnline = true, machineCode = mc)
+                    synchronized(udpCache) {
+                        if (udpCache.size >= 50) udpCache.remove(udpCache.minByOrNull { it.value.hashCode() }?.key)
+                        udpCache[id] = device
+                        updateDevicesFromCache()
+                    }
+                    _statusMessage.value = "发现: $ip ($name)"
+                }
+            } catch (_: Exception) {}
+            _scanProgress.value = "$i/254"
+        }
+    }
 
-            for (i in batchStart..batchEnd) {
-                val ip = "$baseIp.$i"
-                val job = viewModelScope.launch {
-                    try {
-                        val process = Runtime.getRuntime().exec(arrayOf(
-                            "sh", "-c",
-                            "echo 'ping' | nc -w 1 $ip $tcpPort 2>/dev/null"
-                        ))
-                        val output = process.inputStream.bufferedReader().readText().trim()
-                        process.destroy()
+    private fun updateDevicesFromCache() {
+        val now = System.currentTimeMillis()
+        val alive = udpCache.filter { now - it.value.hashCode() < cacheTimeout }
+        val map = _devices.value.associateBy { it.id }.toMutableMap()
+        alive.values.forEach { map[it.id] = it.copy(isOnline = true) }
+        _devices.value = map.values.toList()
+        saveDevices()
+    }
 
-                        if (output.isNotEmpty() && output.startsWith("pong")) {
-                            foundCount++
-                            val parts = output.split("|")
-                            val deviceName = if (parts.size >= 2 && parts[1].isNotEmpty()) parts[1] else "PC"
-                            val machineCode = if (parts.size >= 4) parts[3] else ""
-                            val id = if (machineCode.isNotEmpty()) machineCode else "$deviceName|$ip"
-                            val device = DeviceInfo(
-                                id = id,
-                                ip = ip,
-                                name = deviceName,
-                                isOnline = true,
-                                machineCode = machineCode
-                            )
+    private fun startUdpListener() {
+        if (isUdpListening) return
+        udpListenerJob = viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                var socket: DatagramSocket? = null
+                try {
+                    socket = DatagramSocket(udpPort).apply { broadcast = true; reuseAddress = true; soTimeout = 5000 }
+                    val buffer = ByteArray(1024)
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    isUdpListening = true
+                    while (isUdpListening) {
+                        try {
+                            socket.receive(packet)
+                            val msg = String(packet.data, 0, packet.length)
+                            val ip = packet.address.hostAddress ?: continue
+                            if (msg.isNotBlank() && msg.startsWith("TETHER_AGENT|")) {
+                                val parts = msg.split("|")
+                                if (parts.size >= 3) {
+                                    val name = parts[1]
+                                    val mc = if (parts.size >= 4) parts[3] else ""
+                                    val id = if (mc.isNotEmpty()) mc else "$name|$ip"
+                                    val device = DeviceInfo(id = id, ip = ip, name = name, isOnline = true, machineCode = mc)
+                                    synchronized(udpCache) {
+                                        if (udpCache.size >= 50) udpCache.remove(udpCache.minByOrNull { it.value.hashCode() }?.key)
+                                        udpCache[id] = device
+                                        updateDevicesFromCache()
+                                    }
+                                }
+                            }
+                        } catch (_: SocketTimeoutException) {
                             synchronized(udpCache) {
-                                val existingKey = udpCache.keys.find { key ->
-                                    val existing = udpCache[key]
-                                    existing != null && (existing.id == device.id || existing.ip == device.ip)
-                                }
-                                if (existingKey != null) {
-                                    udpCache.remove(existingKey)
-                                }
-                                if (udpCache.size >= 50) {
-                                    val oldestKey = udpCache.minByOrNull { it.value.hashCode() }?.key
-                                    oldestKey?.let { udpCache.remove(it) }
-                                }
-                                udpCache[id] = device
+                                val now = System.currentTimeMillis()
+                                udpCache.filter { now - it.value.hashCode() > cacheTimeout }.keys.forEach { udpCache.remove(it) }
                                 updateDevicesFromCache()
                             }
-                            Log.d("Tether", "✅ TCP 发现: $ip ($deviceName)")
-                            withContext(Dispatchers.Main) {
-                                _statusMessage.value = "发现: $ip:$deviceName"
-                            }
                         }
-                    } catch (e: Exception) { /* 跳过 */ }
-                }
-                jobs.add(job)
+                    }
+                } finally { socket?.close(); isUdpListening = false }
             }
-            jobs.forEach { it.join() }
-
-            withContext(Dispatchers.Main) {
-                _scanProgress.value = "${batchEnd}/254"
-            }
-            delay(5)
         }
-
-        withContext(Dispatchers.Main) {
-            _scanProgress.value = "254/254"
-        }
-
-        Log.d("Tether", "========== TCP 深度扫描完成 ==========")
-        Log.d("Tether", "发现 $foundCount 台设备")
     }
+
+    private fun stopUdpListener() { isUdpListening = false; udpListenerJob?.cancel(); udpListenerJob = null }
 
     fun stopScan() {
         _isScanning.value = false
         scanJob?.cancel()
         scanJob = null
         stopUdpListener()
-
-        try {
-            mdnsListener?.let {
-                nsdManager?.stopServiceDiscovery(it)
-                mdnsListener = null
-            }
-        } catch (e: Exception) {
-            Log.e("Tether", "清理mDNS失败", e)
-        }
-
+        try { mdnsListener?.let { nsdManager?.stopServiceDiscovery(it) } } catch (_: Exception) {}
+        mdnsListener = null
         _statusMessage.value = "扫描已停止"
     }
 
     fun deleteDevice(device: DeviceInfo) {
-        val newList = _devices.value.filter { it.id != device.id }
-        _devices.value = newList
+        _devices.value = _devices.value.filter { it.id != device.id }
         saveDevices()
-        if (_selectedDevice.value?.id == device.id) {
-            _selectedDevice.value = if (newList.isNotEmpty()) newList.first() else null
-        }
+        if (_selectedDevice.value?.id == device.id) _selectedDevice.value = _devices.value.firstOrNull()
+        synchronized(udpCache) { udpCache.remove(device.id) }
         _statusMessage.value = "已删除: ${device.ip}"
-        synchronized(udpCache) {
-            udpCache.remove(device.id)
-        }
     }
 
-    fun editDeviceIp(oldDevice: DeviceInfo, newIp: String) {
-        if (oldDevice.ip == newIp) { _statusMessage.value = "IP 未改变"; return }
-        if (_devices.value.any { it.ip == newIp && it.id != oldDevice.id }) {
-            _statusMessage.value = "IP $newIp 已存在"
-            return
-        }
-        val newDevice = oldDevice.copy(ip = newIp)
-        val newList = _devices.value.map { if (it.id == oldDevice.id) newDevice else it }
-        _devices.value = newList
+    fun editDeviceIp(old: DeviceInfo, newIp: String) {
+        if (old.ip == newIp) return
+        if (_devices.value.any { it.ip == newIp && it.id != old.id }) { _statusMessage.value = "IP 已存在"; return }
+        val new = old.copy(ip = newIp)
+        _devices.value = _devices.value.map { if (it.id == old.id) new else it }
         saveDevices()
-        if (_selectedDevice.value?.id == oldDevice.id) { _selectedDevice.value = newDevice }
-        _statusMessage.value = "已更新 IP: ${oldDevice.ip} → $newIp"
+        if (_selectedDevice.value?.id == old.id) _selectedDevice.value = new
+        _statusMessage.value = "已更新 IP: ${old.ip} → $newIp"
     }
 
     fun updateDeviceNote(device: DeviceInfo, note: String) {
-        val newDevice = device.copy(note = note)
-        val newList = _devices.value.map { if (it.id == device.id) newDevice else it }
-        _devices.value = newList
+        val new = device.copy(note = note)
+        _devices.value = _devices.value.map { if (it.id == device.id) new else it }
         saveDevices()
-        if (_selectedDevice.value?.id == device.id) { _selectedDevice.value = newDevice }
+        if (_selectedDevice.value?.id == device.id) _selectedDevice.value = new
         _statusMessage.value = "已更新备注: $note"
     }
 
     fun selectDevice(device: DeviceInfo?) {
         _selectedDevice.value = device
-        if (device != null) {
-            _statusMessage.value = "已选择: ${device.ip}"
-            Log.d("Tether", "selectDevice: ${device.ip}")
-        }
+        device?.let { _statusMessage.value = "已选择: ${it.ip}" }
     }
 
     private fun getLocalIpBase(): String {
         try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-            while (interfaces.hasMoreElements()) {
-                val networkInterface = interfaces.nextElement()
-                val addresses = networkInterface.inetAddresses
-                while (addresses.hasMoreElements()) {
-                    val addr = addresses.nextElement()
+            NetworkInterface.getNetworkInterfaces()?.toList()?.forEach { ni ->
+                ni.inetAddresses?.toList()?.forEach { addr ->
                     if (!addr.isLoopbackAddress && addr is Inet4Address) {
-                        val ip = addr.hostAddress ?: continue
+                        val ip = addr.hostAddress ?: return@forEach
                         if (ip.startsWith("192.168.") || ip.startsWith("10.") ||
                             ip.startsWith("172.16.") || ip.startsWith("172.17.") ||
                             ip.startsWith("172.18.") || ip.startsWith("172.19.") ||
@@ -755,76 +468,39 @@ class TetherViewModel : ViewModel() {
                     }
                 }
             }
-        } catch (e: Exception) {
-            Log.e("Tether", "获取本机 IP 失败", e)
-        }
+        } catch (_: Exception) {}
         return "192.168.1"
     }
 
     fun addManualDevice(ip: String) {
-        Log.d("Tether", "addManualDevice: ip=$ip")
         val id = "manual|$ip"
-        if (_devices.value.any { it.id == id }) {
-            _statusMessage.value = "设备已存在"
-            return
-        }
-        val display = DeviceInfo(
-            id = id,
-            ip = ip,
-            name = "手动连接",
-            isManual = true,
-            isOnline = true
-        )
-        _devices.value = _devices.value + display
+        if (_devices.value.any { it.id == id }) { _statusMessage.value = "设备已存在"; return }
+        val device = DeviceInfo(id = id, ip = ip, name = "手动连接", isManual = true, isOnline = true)
+        _devices.value = _devices.value + device
         saveDevices()
-        _selectedDevice.value = display
+        _selectedDevice.value = device
         _statusMessage.value = "已添加设备: $ip"
     }
 
     fun sendCommand(command: String) {
         val device = _selectedDevice.value
-        if (device == null) {
-            _statusMessage.value = "请先选择或添加设备"
-            return
-        }
-        if (!device.isOnline) {
-            _statusMessage.value = "设备离线，无法发送指令"
-            return
-        }
-        val ip = device.ip
-
+        if (device == null) { _statusMessage.value = "请先选择设备"; return }
+        if (!device.isOnline) { _statusMessage.value = "设备离线"; return }
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 try {
-                    Socket(ip, tcpPort).use { socket ->
+                    Socket(device.ip, tcpPort).use { socket ->
                         socket.soTimeout = 3000
                         socket.tcpNoDelay = true
-                        val output = socket.getOutputStream()
-                        output.write((command + "\n").toByteArray())
-                        output.flush()
-
-                        try {
-                            val input = socket.getInputStream()
-                            val buffer = ByteArray(1024)
-                            val len = input.read(buffer)
-                            if (len > 0) {
-                                val response = String(buffer, 0, len)
-                                withContext(Dispatchers.Main) {
-                                    _statusMessage.value = "指令已发送: $command (响应: $response)"
-                                }
-                                return@withContext
-                            }
-                        } catch (e: Exception) { /* 没有响应也正常 */ }
-
-                        withContext(Dispatchers.Main) {
-                            _statusMessage.value = "指令已发送: $command"
-                        }
+                        socket.getOutputStream().write("$command\n".toByteArray())
+                        socket.getOutputStream().flush()
+                        val buffer = ByteArray(1024)
+                        val len = socket.getInputStream().read(buffer)
+                        val response = if (len > 0) String(buffer, 0, len) else "无响应"
+                        withContext(Dispatchers.Main) { _statusMessage.value = "指令已发送: $command (响应: $response)" }
                     }
                 } catch (e: Exception) {
-                    withContext(Dispatchers.Main) {
-                        _statusMessage.value = "发送失败: ${e.message}"
-                    }
-                    Log.e("Tether", "发送指令异常", e)
+                    withContext(Dispatchers.Main) { _statusMessage.value = "发送失败: ${e.message}" }
                 }
             }
         }
